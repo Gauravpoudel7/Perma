@@ -4,15 +4,19 @@ Welcome to the official technical documentation for **PERMA**, a Solana-native p
 
 This repository contains the comprehensive specification for the protocol's architecture, implementation, and operations, with a primary focus on the **Fair MVP** deployment.
 
+> **Source of truth:** **Part A** of [`PRD.md`](../PRD.md) governs Fair MVP scope. Where any document here conflicts with Part A on what ships by Oct 12, 2026, Part A wins. Part B is the post-Fair north star and is **not** Fair scope.
+
 ## 📌 Quick Links
 
-- **[Product PRD](../../PRD.md)** — The master requirements document (Part A: Fair MVP & Part B: Protocol V1).
+- **[Product PRD](../PRD.md)** — The master requirements document (Part A: Fair MVP & Part B: Protocol V1).
 - **[Product Overview](00-overview/PRODUCT.md)** — What PERMA is and why it exists.
 - **[MVP Scope](00-overview/MVP-SCOPE.md)** — The non-negotiable boundaries for the first ship.
 - **[System Architecture](01-architecture/SYSTEM-ARCHITECTURE.md)** — High-level technical flow.
 - **[Component Specs](02-mvp-components/COMPONENT-INDEX.md)** — Deep dives into every on-chain module.
+- **[CLMM Adapter (Orca)](02-mvp-components/01-clmm-adapter-orca.md)** — Whirlpool CPI account layouts and TickArray management; build this first.
 - **[UI/UX Brand System](04-ui-ux/BRAND-SYSTEM.md)** — The visual identity and design language.
 - **[Release Gate](06-testing/RELEASE-GATE.md)** — Criteria for demo readiness.
+- **[ADR-0001](adr/ADR-0001-orca-cpi-instruction-surface.md)** — Orca CPI instruction surface and position ownership model.
 
 ## 📂 Document Map
 
@@ -27,6 +31,8 @@ This repository contains the comprehensive specification for the protocol's arch
 | **06 Testing** | Quality Assurance | `TEST-STRATEGY.md`, `RELEASE-GATE.md` |
 | **07 Ops** | Deployment & Demo | `RUNBOOK-DEVNET.md`, `PRESENTATION-BRIEF.md` |
 | **08 Living Docs** | Maintenance | `DOC-GOVERNANCE.md`, `CHANGELOG-POLICY.md` |
+| **ADR** | Architecture Decisions | [`adr/`](adr/) — numbered, immutable once Accepted |
+| **Audits** | Doc & Code Review | [`audits/`](audits/) — `DOCS-AUDIT-REPORT.md`, `DOCS-AUDIT-FIX-REPORT.md` |
 
 ---
 

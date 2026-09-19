@@ -4,7 +4,7 @@
 The PERMA MVP documentation pack is complete. The system is designed to prove the feasibility of perpetual options using Solana's concentrated liquidity.
 
 ## Critical Path for Day-1 Implementation
-1. **Step 1: Orca Adapter**. Implement the `CLMM Adapter` to allow `increase_position` and `decrease_position` calls.
+1. **Step 1: Orca Adapter**. Implement the `CLMM Adapter` to allow `increase_liquidity_v2` and `decrease_liquidity_v2` CPIs.
 2. **Step 2: Collateral & Markets**. Setup the `GlobalConfig` and `Market` PDAs.
 3. **Step 3: Short Mint**. Enable users to lock collateral and add liquidity to Orca.
 4. **Step 4: Long Mint**. Implement the inventory check and long position creation.

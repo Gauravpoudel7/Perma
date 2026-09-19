@@ -3,6 +3,8 @@
 ## Component Specifications
 All components follow the **Institutional Precision** brand system: solid surfaces, thin borders, no glassmorphism.
 
+Pixel values below are the resolved sizes of [`BRAND-SYSTEM.md`](BRAND-SYSTEM.md) tokens — implement with the token, not the literal. Mapping: 11px = `overline`, 12px = `caption` / `mono-sm`, 14px = `body-md` / `button` / `mono-md`, 24px = `metric-lg`, 4px radius = `radius-md`.
+
 ### 1. The "PERMA Button"
 - **Primary**: White BG, Black Text, Bold Sans. 
     - *Hover*: Light gray BG.

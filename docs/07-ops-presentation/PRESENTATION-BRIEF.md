@@ -18,7 +18,7 @@ Convince the judges that PERMA is a professional-grade volatility primitive that
 ## Visual Aids
 - **Architecture Diagram**: Show the flow from User $\rightarrow$ PERMA $\rightarrow$ Orca.
 - **Portfolio View**: Demonstrate the real-time premium accrual.
-- **Explorer Proof**: Show the actual `increase_position` CPI on the blockchain.
+- **Explorer Proof**: Show the actual `increaseLiquidityV2` CPI into Orca Whirlpool on the blockchain.
 
 ---
 

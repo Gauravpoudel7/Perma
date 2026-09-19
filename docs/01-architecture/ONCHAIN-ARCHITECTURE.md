@@ -34,7 +34,7 @@ The most critical path in the program is the `Position Engine` $\rightarrow$ `CL
 
 1. **Validation**: PERMA verifies the user has enough collateral.
 2. **Transfer**: PERMA transfers SOL/USDC to the Whirlpool account.
-3. **Instruction**: PERMA calls `whirlpool.increase_position(...)` with the specified tick range.
+3. **Instruction**: PERMA calls `whirlpool::increase_liquidity_v2(...)` for the specified tick range.
 4. **Confirmation**: PERMA verifies the resulting Whirlpool position account matches the expected liquidity increase.
 
 ## Memory & Compute Budget (CU)

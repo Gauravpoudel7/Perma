@@ -8,7 +8,7 @@ The user selects a price range and a size. Upon confirmation, their collateral i
 
 ## Dependencies
 - **Position Engine**: For creating the `Position` PDA.
-- **CLMM Adapter**: To execute the `increase_position` call on Orca.
+- **CLMM Adapter**: To execute the Orca `open_position` + `increase_liquidity_v2` CPIs.
 - **Collateral Manager**: To lock the required assets.
 
 ## State & PDAs

@@ -6,14 +6,15 @@
 - **Visual**: A muted, high-contrast autoplay video loop (background). 
     - *Spec*: 1920x1080, grayscale or deep-blue filtered, showing abstract liquidity flows or trading terminal snippets.
     - *Poster*: High-res still of the product UI.
-- **Copy**:
-    - **Headline (Serif)**: "The New Standard for Volatility."
-    - **Subheadline (Sans)**: "Perpetual options powered by Solana's most efficient concentrated liquidity. No expiries. No synthetic vaults. Just real liquidity."
+- **Copy** — strings are owned by [`COPY-DECK.md`](COPY-DECK.md) §3; do not author new ones here:
+    - **Headline (Serif `Display`)**: "Perpetual options backed by Orca Whirlpool liquidity."
+    - **Subheadline (Sans `Body LG`)**: "Open a short and PERMA adds concentrated liquidity to a SOL/USDC Whirlpool on your behalf. Longs pay a streaming premium against that liquidity. No expiry date, no settlement window."
+    - **Banner**: the mandatory Prototype banner renders in the hero, not only the footer (`COPY-DECK.md` §1).
     - **CTA**: [Launch App] (High contrast white button).
 
 ### 2. The Thesis (The "Why")
 - **Layout**: Split screen. Left: Large serif headline. Right: Concise bullet points.
-- **Copy**: "Options shouldn't be a guessing game with a Friday cliff. PERMA turns CLMM positions into a streaming volatility instrument. You provide the range; the protocol provides the precision."
+- **Copy** (`COPY-DECK.md` §3 "Mechanism section"): "A short seller picks a price range and a size. PERMA deposits the matching SOL and USDC into the allowlisted Whirlpool as concentrated liquidity and records the position. A buyer can open a long only against short liquidity that already exists in that range, and pays premium continuously while the position is open. Closing settles accrued premium and P&L back into collateral."
 
 ### 3. How It Works (The "Mechanism")
 - **Interactive Diagram**: A simplified view of the Short $\rightarrow$ Long loop.
@@ -25,7 +26,7 @@
 
 ### 4. Architecture Snapshot
 - **Visual**: A clean, technical diagram showing the connection between `PERMA` $\rightarrow$ `Orca` $\rightarrow$ `Solana`.
-- **Caption**: "Native integration with Orca Whirlpools ensures every option is backed by real, tradeable assets."
+- **Caption**: "Every short is a real Orca Whirlpool position. The `increaseLiquidityV2` CPI is visible on any Solana explorer."
 
 ### 5. FAQ & Legal
 - **FAQ**: Focused on "What is a perpetual option?" and "How is solvency managed?".

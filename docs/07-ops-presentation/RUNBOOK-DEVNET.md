@@ -10,13 +10,13 @@ anchor deploy --provider.cluster devnet
 ### 2. Market Initialization
 Run the seed script to setup the global config and the SOL/USDC market:
 ```bash
-npm run scripts:init-market
+yarn scripts:init-market
 ```
 
 ### 3. Seeding Liquidity (For Demo)
 To ensure Longs can be opened, seed the market with initial short liquidity:
 ```bash
-npm run scripts:seed-shorts --amount 10000 --range 180-220
+yarn scripts:seed-shorts --amount 10000 --range 180-220
 ```
 
 ## Monitoring & Maintenance
@@ -24,13 +24,13 @@ npm run scripts:seed-shorts --amount 10000 --range 180-220
 ### Checking Market Status
 Use the CLI tool to check current liquidity inventory:
 ```bash
-npm run perma-cli get-market-status
+yarn perma-cli get-market-status
 ```
 
 ### Emergency Pause
 If an anomaly is detected, immediately pause the market:
 ```bash
-npm run perma-cli pause-market
+yarn perma-cli pause-market
 ```
 
 ## Common Issues
