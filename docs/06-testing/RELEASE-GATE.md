@@ -152,10 +152,10 @@ solana program deploy target/deploy/perma.so \
 npx ts-mocha -p ./tsconfig.json -t 1000000 \
   tests/adapter.ts tests/adapter-liquidity.ts tests/collateral.ts \
   tests/factory.ts tests/position-short.ts tests/position-long.ts \
-  tests/settle-premium.ts tests/risk-solvency.ts tests/pause-admin.ts
+  tests/settle-premium.ts tests/risk-solvency.ts tests/pause-admin.ts tests/events.ts
 ```
 
-Expected: **93 passing, 0 failing** (76 through component 09 + 17 in `tests/pause-admin.ts`). This covers gates **S1–S5** below. `pause-admin.ts` goes **last** in the forward list: it self-heals (unpause + restore risk defaults) in its own `before()`/`after()`, so the reversed pass — where it runs first — also stays clean.
+Expected: **102 passing, 0 failing** (76 through component 09 + 17 in `tests/pause-admin.ts` + 9 in `tests/events.ts`). This covers gates **S1–S5** below. `pause-admin.ts` and `events.ts` go **last** in the forward list: both self-heal (unpause + restore risk defaults + burn what they opened) in their own `before()`/`after()`, so the reversed pass — where they run first — also stays clean.
 
 > `tests/factory-rewards.ts` is **excluded on purpose** and needs its own `--reset`
 > ledger: it allowlists a different pool, so running it alongside makes every other

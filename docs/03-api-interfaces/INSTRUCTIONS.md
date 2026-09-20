@@ -2,7 +2,7 @@
 
 The **17** public instructions of the PERMA program, as shipped through component 10. Names, parameters and account lists are the live ones (`programs/perma/src/lib.rs`); the working client patterns are in `tests/*.ts`. Sizes were measured on a local validator with `scripts/measure-position.mjs` (2026-09-20).
 
-`Market.is_paused` (written by `pause_market` / `unpause_market`, component 10) gates only the **risk-increasing** instructions: `mint_position`, `deposit_collateral`, `lock_collateral`, `adapter_open_position`, `adapter_add_liquidity` reject `MarketPaused`. Exit paths — `burn_position`, `settle_premium`, `withdraw_collateral`, `unlock_collateral`, `adapter_close_position`, `adapter_remove_liquidity` — and the read-only `validate_short_range` run while paused, subject to their own gates. Full matrix: [`10-pause-admin.md`](../02-mvp-components/10-pause-admin.md).
+`Market.is_paused` (written by `pause_market` / `unpause_market`, component 10) gates only the **risk-increasing** instructions: `mint_position`, `deposit_collateral`, `lock_collateral`, `adapter_open_position`, `adapter_add_liquidity` reject `MarketPaused`. Exit paths — `burn_position`, `settle_premium`, `withdraw_collateral`, `unlock_collateral`, `adapter_close_position`, `adapter_remove_liquidity` — and the read-only `validate_short_range` run while paused, subject to their own gates. Full matrix: [`10-pause-admin.md`](../02-mvp-components/10-pause-admin.md). Every instruction emits an Anchor event on success — see [`EVENT-CATALOG.md`](EVENT-CATALOG.md).
 
 ## 1. Global Administration
 

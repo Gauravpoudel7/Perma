@@ -9,6 +9,8 @@ export interface ToastData {
   variant: ToastVariant;
   message: string;
   signature?: string;
+  /** Optional mono line under the message — e.g. the decoded on-chain event names. */
+  detail?: string;
 }
 
 /**
@@ -30,6 +32,7 @@ export function Toast({ toast }: { toast: ToastData }) {
       className={`transition-brand w-80 rounded-md border border-border ${borderColor} border-l-2 bg-surface p-4 text-body-sm text-text-primary shadow-none`}
     >
       <p>{toast.message}</p>
+      {toast.detail && <p className="mt-1 text-mono-sm text-text-muted">{toast.detail}</p>}
       {toast.signature && (
         <a
           href={explorerTxUrl(toast.signature)}

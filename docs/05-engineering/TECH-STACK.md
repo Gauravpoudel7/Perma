@@ -14,7 +14,7 @@
 - **State**: Zustand
 - **Blockchain Interaction**: `@solana/web3.js`, `@coral-xyz/anchor`.
 
-## Indexing & Data — *planned; not in the repo*
+## Indexing & Data — *P2; not in the repo* (Fair's consumer is `apps/web/src/lib/events.ts`, no database)
 - **Runtime**: Node.js
 - **Database**: PostgreSQL (via Prisma ORM).
 - **RPC Provider**: Helius / Triton (Devnet).

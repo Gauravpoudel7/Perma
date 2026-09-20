@@ -87,6 +87,16 @@ Chromium download — see the report if `playwright install` ever times out
 here again), and the real mobile-overflow bug this pass found and fixed in
 `Sidenav.tsx`.
 
+### Events (component 11)
+
+After a transaction confirms, `src/hooks/useSendPermaTx.ts` decodes that
+transaction's Anchor events via `src/lib/events.ts` and refetches only the
+slices they touched (market, premium index, the named range) on top of the
+unconditional collateral + positions refetch; the success toast names the
+events. Polling is untouched and remains the source of truth — if decoding
+yields nothing, nothing changes. Catalog: `docs/03-api-interfaces/EVENT-CATALOG.md`.
+Unit tests: `test/events.test.ts`; on-chain: `tests/events.ts` at the repo root.
+
 Manual verification against the local validator remains the release gate for
 actual on-chain transactions — three scripts exercise the app's REAL
 `src/lib/*` modules (PDA derivation, account decoding, instruction building,

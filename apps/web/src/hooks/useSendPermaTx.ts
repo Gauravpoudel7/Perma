@@ -4,8 +4,16 @@ import { useCallback } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Transaction, type TransactionInstruction, type Signer } from "@solana/web3.js";
 import { usePermaProgram } from "./usePermaProgram";
-import { fetchAllPositionsForOwner, fetchOpenLongsForOwner } from "../lib/accounts";
+import {
+  fetchAllPositionsForOwner,
+  fetchMarket,
+  fetchOpenLongsForOwner,
+  fetchPremiumIndex,
+  fetchRangeState,
+} from "../lib/accounts";
 import { parseAnchorError } from "../lib/errors";
+import { premiumIndexPda, rangeStatePda } from "../lib/pda";
+import { describeEvents, fetchTxEvents, slicesTouchedBy, type PermaEvent } from "../lib/events";
 import { useChainStore } from "../store/useChainStore";
 import { useToastStore } from "../components/primitives/ToastContainer";
 
@@ -17,7 +25,12 @@ import { useToastStore } from "../components/primitives/ToastContainer";
  * 3. on success: replace the toast with the caller's success copy (+ the
  *    "View transaction" link), then immediately re-fetch every chain-derived
  *    account this app cares about — not waiting for the next poll tick — so
- *    Portfolio/Vault reflect the new state right away.
+ *    Portfolio/Vault reflect the new state right away. Component 11 adds a
+ *    best-effort decode of the confirmed tx's events (`lib/events.ts`): they
+ *    pick which *extra* slices (market, premium index, the touched range) to
+ *    refetch on top of the unconditional collateral + positions refetch, and
+ *    they name what happened on the toast. If decoding yields nothing, the
+ *    behavior is exactly the pre-11 one; polling is never replaced.
  * 4. on failure: map the error via `lib/errors.ts` and show
  *    "Transaction failed: {program error}. Nothing was changed." with a
  *    "View transaction" link only if a signature actually exists (a
@@ -33,6 +46,9 @@ export function useSendPermaTx() {
   const marketPubkey = useChainStore((s) => s.marketPubkey);
   const setUserCollateral = useChainStore((s) => s.setUserCollateral);
   const setPositions = useChainStore((s) => s.setPositions);
+  const setMarket = useChainStore((s) => s.setMarket);
+  const setPremiumIndex = useChainStore((s) => s.setPremiumIndex);
+  const setRangeState = useChainStore((s) => s.setRangeState);
   const touchRefreshedAt = useChainStore((s) => s.touchRefreshedAt);
 
   const refetchAll = useCallback(async () => {
@@ -48,6 +64,29 @@ export function useSendPermaTx() {
     setPositions(positions);
     touchRefreshedAt();
   }, [publicKey, marketPubkey, program, connection, setUserCollateral, setPositions, touchRefreshedAt]);
+
+  /** Event-directed extras: only the slices the confirmed tx actually touched. */
+  const refetchTouched = useCallback(
+    async (events: PermaEvent[]) => {
+      if (!marketPubkey || events.length === 0) return;
+      const touched = slicesTouchedBy(events);
+      const ranges = touched.allKnownRanges
+        ? Object.keys(useChainStore.getState().rangeStates).map((k) => k.split(":").map(Number) as [number, number])
+        : touched.ranges;
+      await Promise.all([
+        touched.market ? fetchMarket(program, marketPubkey).then(setMarket) : null,
+        touched.premiumIndex
+          ? fetchPremiumIndex(program, premiumIndexPda(marketPubkey)[0]).then(setPremiumIndex)
+          : null,
+        ...ranges.map(([lo, hi]) =>
+          fetchRangeState(program, rangeStatePda(marketPubkey, lo, hi)[0]).then((s) => {
+            if (s) setRangeState({ tickLower: lo, tickUpper: hi }, s);
+          })
+        ),
+      ]);
+    },
+    [marketPubkey, program, setMarket, setPremiumIndex, setRangeState]
+  );
 
   const send = useCallback(
     async (
@@ -71,7 +110,10 @@ export function useSendPermaTx() {
         await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
 
         update(toastId, { variant: "success", message: opts.successMessage, signature });
-        await refetchAll();
+        // Best-effort: `[]` on any failure, and then this is exactly the pre-11 path.
+        const events = await fetchTxEvents(connection, program, signature);
+        if (events.length > 0) update(toastId, { detail: describeEvents(events) });
+        await Promise.all([refetchAll(), refetchTouched(events)]);
         return signature;
       } catch (e) {
         const { message } = parseAnchorError(e);
@@ -84,7 +126,7 @@ export function useSendPermaTx() {
         throw e;
       }
     },
-    [publicKey, connection, sendTransaction, push, update, refetchAll]
+    [publicKey, connection, program, sendTransaction, push, update, refetchAll, refetchTouched]
   );
 
   return { send, refetchAll };

@@ -14,7 +14,7 @@ perma/
 │   ├── hooks/             # Solana/Anchor custom hooks
 │   ├── lib/               # SDK & API clients
 │   └── pages/             # Application routes
-├── indexer/               # Off-chain state sync (Node.js) — PLANNED, not in repo
+├── indexer/               # Off-chain state sync (Node.js) — P2, not in repo; Fair's event consumer is apps/web/src/lib/events.ts
 │   ├── src/               # Indexer logic
 │   └── prisma/            # Database schema
 ├── docs/                  # Technical & Product documentation

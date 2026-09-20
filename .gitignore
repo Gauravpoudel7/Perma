@@ -6,7 +6,6 @@ test-ledger
 dist
 # Local-only / Claude session artifacts (not for GitHub)
 docs/prompts/
-docs/audits/
 docs/PERMA-LEARNING-BOOK.md
 docs/09-post-mvp/
 docs/04-ui-ux/screenshots/

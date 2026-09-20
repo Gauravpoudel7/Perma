@@ -563,7 +563,9 @@ Empty short inventory = failed demo.
 
 ## B32. Events
 
-`MarketCreated`, `CollateralDeposited`, `CollateralWithdrawn`, `PositionMinted`, `PositionBurned`, `PositionExercised`, `PremiumSettled`, `LiquidationExecuted`, `ForceExerciseExecuted`, `FeesCollected`, `ObservationsUpdated`, `MarketPaused`
+Fair (live, 19 — see [`docs/03-api-interfaces/EVENT-CATALOG.md`](docs/03-api-interfaces/EVENT-CATALOG.md)): `GlobalConfigInitialized`, `MarketCreated`, `MarketPauseSet`, `MarketPauseCleared`, `MarketRiskParamsSet`, `RangeValidated`, `CollateralDeposited`, `CollateralWithdrawn`, `CollateralLocked`, `CollateralUnlocked`, `ShortMinted`, `LongMinted`, `PremiumSettled`, `ShortBurned`, `LongBurned`, plus the adapter-harness `PositionOpened`, `PositionClosed`, `LiquidityAdded`, `LiquidityRemoved`.
+
+Post-MVP (not emitted; no such instruction exists): `PositionExercised`, `LiquidationExecuted`, `ForceExerciseExecuted`, `FeesCollected`, `ObservationsUpdated`.
 
 ## B33. Indexer / frontend (post-MVP polish)
 

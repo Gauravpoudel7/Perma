@@ -51,7 +51,7 @@ The team may implement **at most one** of the following:
 
 ## After Fair
 
-When the Fair release gate is green — including components **10 (pause/admin)** and **11 (events)** — Protocol V1 work is specified under [`docs/09-post-mvp/`](../09-post-mvp/). That folder does **not** expand Fair scope. Do not start post-MVP implementation while 10/11 remain open.
+Components **10 (pause/admin)** and **11 (events, Fair-thin)** are shipped; the Fair release gate ([`RELEASE-GATE.md`](../06-testing/RELEASE-GATE.md)) is the remaining bar. Protocol V1 work is specified under [`docs/09-post-mvp/`](../09-post-mvp/). That folder does **not** expand Fair scope — the P2 indexer/product UI in particular is not Fair work.
 
 ---
 

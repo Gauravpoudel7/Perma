@@ -16,7 +16,7 @@ Build order is defined in `PRD.md` §A11 and is **not** the same as the numberin
 | 08 | [Burn & Settle](08-burn-settle.md) | Closes a position and settles premium in cash. Short LP result realized via Orca returns; long P&L = 0 (ADR-0003). | ✅ shipped |
 | 09 | [Risk & Solvency](09-risk-solvency.md) | Long-premium liability + horizon margin on withdraw and long mint. No price input. | ✅ shipped (ADR-0003) |
 | 10 | [Pause Admin](10-pause-admin.md) | Emergency halt for new risk; exits always open. | ✅ shipped ([`IMPL-10-PAUSE-ADMIN-REPORT.md`](../audits/IMPL-10-PAUSE-ADMIN-REPORT.md)); `pause_global` deferred |
-| 11 | [Events Indexing](11-events-indexing.md) | On-chain events feeding the off-chain cache the UI reads. | ⬜ not started (events emitted; no indexer) |
+| 11 | [Events Indexing](11-events-indexing.md) | Complete on-chain events + a thin post-tx consumer in the web app. | ✅ shipped Fair-thin ([`IMPL-11-EVENTS-INDEXING-REPORT.md`](../audits/IMPL-11-EVENTS-INDEXING-REPORT.md)); DB indexer + APIs → P2 |
 
 ## The MVP loop
 

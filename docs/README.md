@@ -26,7 +26,7 @@ This repository contains the comprehensive specification for the protocol's arch
 | **00 Overview** | Product Thesis & Scope | `PRODUCT.md`, `MVP-SCOPE.md`, `GLOSSARY.md` |
 | **01 Architecture** | System Design | `SYSTEM-ARCHITECTURE.md`, `THREAT-MODEL.md` |
 | **02 Components** | Module Implementation | `COMPONENT-INDEX.md`, `01-clmm-adapter-orca.md`... |
-| **03 API** | Interfaces | `INSTRUCTIONS.md`, `CLIENT-SDK.md` |
+| **03 API** | Interfaces | `INSTRUCTIONS.md`, `ERROR-CATALOG.md`, `EVENT-CATALOG.md`, `CLIENT-SDK.md` |
 | **04 UI/UX** | Design & Brand | `BRAND-SYSTEM.md`, `APP-SHELL.md` |
 | **05 Engineering** | Tech Stack & Dev | `TECH-STACK.md`, `LOCAL-DEV.md` |
 | **06 Testing** | Quality Assurance | `TEST-STRATEGY.md`, `RELEASE-GATE.md` |

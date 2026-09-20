@@ -1,78 +1,76 @@
 # Component: Events Indexing
 
-## Purpose
-The Events Indexing component ensures that the off-chain frontend has a real-time, accurate view of the protocol's state. Since reading thousands of PDAs directly via RPC is inefficient, the indexer listens for on-chain events and caches the state in a database.
+> **Status: IMPLEMENTED — Fair-thin.** Fair MVP ships (1) the complete on-chain event surface — 19 events, one per lifecycle action, frozen in [`EVENT-CATALOG.md`](../03-api-interfaces/EVENT-CATALOG.md); (2) a **minimal consumer** in the web app that decodes the events of the transaction it just confirmed and refetches only what they touched; (3) tests that decode every product-path event from real transaction logs. The database-backed listener, REST history APIs and websocket push this spec originally described are **P2** — see [`docs/09-post-mvp/INDEXER-AND-PRODUCT-UI.md`](../09-post-mvp/INDEXER-AND-PRODUCT-UI.md) — per [`MVP-SCOPE.md`](../00-overview/MVP-SCOPE.md) ("Advanced Indexing … out of scope; minimal RPC cache is OK") and [`ROADMAP.md`](../09-post-mvp/ROADMAP.md) P0 vs P2. Record: [`IMPL-11-FEASIBILITY.md`](../audits/IMPL-11-FEASIBILITY.md), [`IMPL-11-EVENTS-INDEXING-REPORT.md`](../audits/IMPL-11-EVENTS-INDEXING-REPORT.md).
 
-## User-Facing Behavior
-Users experience "instant" updates to their portfolio, premium accrual, and market liquidity without having to manually refresh the page.
+## Purpose
+Give the off-chain UI an accurate view of protocol state without reading every PDA on every tick, and make the protocol *observable*: every state change is an Anchor event a third party can decode from transaction logs with nothing but the IDL.
+
+## User-Facing Behavior (Fair)
+Portfolio, Vault and Trade read chain state by **RPC polling** (`Market` 30 s; positions, collateral, range state, premium index 15 s). After a transaction the user sent confirms, the app refetches collateral + positions unconditionally **and** decodes that transaction's events to refetch the extra slices they name — the touched range, the premium index, the market — so the tiles reflect the new state immediately rather than at the next tick, and the success toast names what happened (e.g. `ShortMinted`). Nothing is "instant" in the websocket sense, and nothing depends on the decode: if it yields nothing, the behavior is exactly the polling one.
 
 ## Dependencies
-- **Solana RPC**: For fetching transaction logs and account data.
-- **Frontend API**: The interface that serves the cached data to the React app.
+- **Solana RPC**: `getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })` for logs; account reads for polling.
+- **Anchor IDL**: event discriminators and layouts (`apps/web/src/idl/perma.json`).
 
 ## State & PDAs
-This component is entirely off-chain. It mirrors the state of the `Position`, `Market`, and `UserCollateral` PDAs.
+No on-chain state. The consumer holds nothing durable: the Zustand `useChainStore` is a per-session cache of the `Market`, `UserCollateral`, `PermaPosition`, `RangePremiumState` and `GlobalPremiumIndex` accounts, refreshed by polling and by post-tx refetch.
 
-## Public Interface (API)
+## Public Interface (Fair) — `apps/web/src/lib/events.ts`
 
-### `GET /positions/{user}`
-- **Returns**: List of all active positions for the user. *(No on-chain P&L exists to surface — Fair MVP values nothing against a price; see ADR-0003.)*
+| Function | Behavior |
+|---|---|
+| `decodePermaEvents(program, logs) → PermaEvent[]` | Parses PERMA events out of raw log lines with Anchor's `EventParser`; skips other programs and garbage; never throws. |
+| `fetchTxEvents(connection, program, signature) → Promise<PermaEvent[]>` | Fetches the confirmed tx and decodes its logs. Returns `[]` on a not-yet-visible tx, missing meta, or any RPC error — **best-effort by contract**. |
+| `slicesTouchedBy(events) → { market, collateral, positions, premiumIndex, ranges, allKnownRanges }` | Pure mapping from events to store slices (see the catalog's "Fair consumer use" column). |
+| `describeEvents(events) → string` | PascalCase names for the toast detail line. |
 
-### `GET /market/{pool}`
-- **Returns**: Current short liquidity inventory and premium rate.
+Wired in `hooks/useSendPermaTx.ts`: `confirmTransaction` → `fetchTxEvents` → success toast (+ detail) → `Promise.all([refetchAll(), refetchTouched(events)])`.
 
-### `GET /user/{user}/collateral`
-- **Returns**: Current balances (`balance_*`, `locked_*`, `premium_owed_usdc`, `open_positions`). *(A solvency figure arrives with component 09's margin fields.)*
+The REST endpoints (`GET /positions/{owner}`, `/market/{pool}`, `/user/{user}/collateral`, history and series) are **P2** and defined in `INDEXER-AND-PRODUCT-UI.md`.
 
-## Algorithms & Pseudocode
-
-### Indexing Loop
-```javascript
-async function indexLoop() {
-    const logs = await rpc.getSignaturesForAddress(PROGRAM_ID);
-    for (const sig of logs) {
-        const tx = await rpc.getTransaction(sig);
-        const events = parseEvents(tx.logs);
-        
-        for (const event of events) {
-            // Live event names (programs/perma/src/lib.rs): ShortMinted, LongMinted, ShortBurned, LongBurned,
-            // PremiumSettled, PositionOpened/PositionClosed + LiquidityAdded/LiquidityRemoved (adapter harness),
-            // CollateralDeposited/Withdrawn/Locked/Unlocked, MarketCreated, GlobalConfigInitialized, RangeValidated.
-            if (event.type === 'ShortMinted' || event.type === 'LongMinted') {
-                await db.positions.insert(event.data);
-            } else if (event.type === 'ShortBurned') {
-                await db.positions.update(event.data.permaPosition, { status: event.data.status }); // Closed or PendingPremium
-            } else if (event.type === 'LongBurned') {
-                await db.positions.update(event.data.permaPosition, { status: 'Closed' });
-            }
-            // ... other events
-        }
-    }
-}
+## Algorithms & Pseudocode (Fair consumer)
+```ts
+// after confirmTransaction(sig, "confirmed")
+const events = await fetchTxEvents(connection, program, sig);   // [] on any failure
+update(toast, { detail: describeEvents(events) });
+const t = slicesTouchedBy(events);
+await Promise.all([
+  refetchAll(),                                                  // unchanged: collateral + positions
+  t.market       && fetchMarket(...).then(setMarket),
+  t.premiumIndex && fetchPremiumIndex(...).then(setPremiumIndex),
+  ...(t.allKnownRanges ? knownRanges : t.ranges).map(([lo, hi]) => fetchRangeState(...).then(setRangeState)),
+]);
 ```
 
 ## Invariants
-- **Eventual Consistency**: The indexer must eventually reflect the exact state of the on-chain PDAs.
-- **No Missed Events**: The indexer must track the last processed slot to ensure no gaps in the event stream.
+- **Polling is the source of truth.** No hook stops polling; no component needs an event to render; a consumer failure is invisible except for a missing toast line.
+- **Events are complete and truthful.** Every one of the 17 instructions emits on its success path; a failed instruction emits nothing; `PremiumSettled` is emitted only with a matching token movement; idempotent pause/unpause emit nothing.
+- **Stability.** No renames, no field reorders/removals, additive only (catalog §5).
 
 ## Failure Modes & Errors
-- **RPC Rate Limit**: The indexer may be throttled by the RPC provider. Mitigation: Use a dedicated RPC node.
-- **Re-orgs**: A block re-org could invalidate a processed event. Mitigation: Wait for "finalized" commitment before indexing.
+- **`getTransaction` returns null** (RPC lagging "confirmed"): decode yields `[]`; the unconditional refetch and polling cover it.
+- **RPC error / rate limit**: same — `[]`, poll continues.
+- **Re-orgs**: the app reads at "confirmed" and re-polls; there is no durable store to invalidate.
 
 ## Security Notes
-- **Read-Only**: The indexer has no write access to the blockchain; it is a pure observer.
-- **Data Integrity**: The frontend should occasionally "cross-check" critical values (like collateral balance) directly against the RPC before a trade.
+- **Read-Only**: the consumer has no write access to the blockchain; it is a pure observer.
+- **Data Integrity**: The frontend should occasionally "cross-check" critical values (like collateral balance) directly against the RPC before a trade. *(Kept and enforced: `OpenPositionButton` and `WithdrawForm` fetch the user's open longs fresh from RPC — never from the store or from events — before building a risk-increasing transaction.)*
 
-## Test Cases
-- **Success**: Mint a position on-chain $\rightarrow$ Verify it appears in the API within seconds.
-- **Success**: Burn a position $\rightarrow$ Verify it is marked as `Closed` in the database.
-- **Failure**: Simulate an RPC timeout $\rightarrow$ Verify the indexer retries and eventually catches up.
+## Test Cases (`tests/events.ts`, 9 cases, in the release gate; `apps/web/test/events.test.ts`, 11 unit cases)
+- Mint SHORT → exactly one `ShortMinted`; `locked_b` equals the position's recorded lock; `open_positions` matches the ledger.
+- Mint LONG → `LongMinted`; `total_*_liquidity` / `available_after` equal the range state after.
+- Settle LONG / settle SHORT → `PremiumSettled` with `leg_type` 1 / 0 and `amount` exactly equal to the escrow delta.
+- Burn LONG → `LongBurned`, account gone; burn SHORT → `ShortBurned` whose `status` matches whether the account still exists.
+- Pause → `MarketPauseSet`; pause again → **zero** events; unpause → `MarketPauseCleared`; `set_market_risk_params` → `MarketRiskParamsSet`.
+- A failed instruction's logs decode to zero events.
+- Unit: hand-built `Program data:` fixtures interleaved with Orca/Token/garbage lines decode to exactly the PERMA events; `fetchTxEvents` returns `[]` on null tx / no logs / RPC throw; `slicesTouchedBy` mapping table.
 
 ## Observability & Events
-- `IndexerSyncComplete(last_slot)`
-- `IndexerError(slot, error)`
+The on-chain events are the observability. Full list: [`EVENT-CATALOG.md`](../03-api-interfaces/EVENT-CATALOG.md). There is no separate indexer process in Fair, so `IndexerSyncComplete` / `IndexerError` do not exist; they belong to the P2 service.
 
-## MVP Done Definition
-- [ ] Basic listener for `ShortMinted` / `LongMinted` / `ShortBurned` / `LongBurned` / `PremiumSettled`.
-- [ ] Simple API providing current position lists for users.
-- [ ] Integration with the frontend "Portfolio" view.
+## MVP Done Definition (Fair-thin)
+- [x] Every lifecycle action emits an event; component-10 admin events included; catalog frozen with stability rules.
+- [x] Minimal consumer: decode the confirmed tx's events → targeted refetch; polling and post-tx refetch unchanged; toast names the events.
+- [x] Tests decode `ShortMinted` / `LongMinted` / `ShortBurned` / `LongBurned` / `PremiumSettled` (both legs) / pause / risk-param events from real transaction logs.
+- [x] RPC cross-check before risk-increasing actions preserved.
+- [ ] **P2** — standing listener + database, `GET` history APIs, websocket push, charts from indexed series: `INDEXER-AND-PRODUCT-UI.md`.

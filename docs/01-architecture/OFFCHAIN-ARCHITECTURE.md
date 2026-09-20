@@ -1,5 +1,7 @@
 # OFFCHAIN ARCHITECTURE: PERMA
 
+> **Aspirational — P2.** The indexer → PostgreSQL → API pipeline below is the post-MVP product stack ([`docs/09-post-mvp/INDEXER-AND-PRODUCT-UI.md`](../09-post-mvp/INDEXER-AND-PRODUCT-UI.md)). Fair MVP ships **no** off-chain service: the web app polls RPC and, after each transaction it sends, decodes that transaction's events to refetch what changed (`apps/web/src/lib/events.ts`; component 11, [`11-events-indexing.md`](../02-mvp-components/11-events-indexing.md)). The direct-RPC fallback rule in §UI Integration Strategy is the one part of this page that is live today.
+
 ## System Topology
 The off-chain stack is designed for low latency and a premium user experience, moving away from "raw RPC" calls toward a cached, indexed state.
 

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. Format follows [`08-living-docs/CHANGELOG-POLICY.md`](08-living-docs/CHANGELOG-POLICY.md).
 
+## [0.11.0] - 2026-09-21 — component 11: Events / thin indexing (Fair)
+### Added
+- `docs/03-api-interfaces/EVENT-CATALOG.md` — the 19 live events, fields, emitting instructions, decoding notes, stability rules; `apps/web/src/lib/events.ts` (`decodePermaEvents`, `fetchTxEvents`, `slicesTouchedBy`, `describeEvents`) wired into `useSendPermaTx` (event-directed refetch of market / premium index / touched ranges on top of the unchanged collateral + positions refetch; toast `detail` names the events); `tests/events.ts` (9, decodes every product-path + admin event from real logs); `apps/web/test/events.test.ts` (11).
+### Changed
+- `11-events-indexing.md` narrowed to Fair-thin (DB listener / REST history / websockets → P2, `INDEXER-AND-PRODUCT-UI.md`); `OFFCHAIN-ARCHITECTURE.md`, `TECH-STACK.md`, `REPO-STRUCTURE.md` marked aspirational/P2; `PRD.md` §B32 event list corrected to live names. Release gate: 102 passing (was 93).
+### Unchanged
+- No program, IDL, or account change. No event renamed or reshaped.
+
 ## [0.10.0] - 2026-09-21 — component 10: Pause / Admin
 ### Added
 - `pause_market` / `unpause_market` (admin-only, idempotent, emit `MarketPauseSet` / `MarketPauseCleared` on transition); `set_market_risk_params` (admin-only, writes the two ADR-0003 risk fields, re-validates overflow via `risk::validate_risk_params` at `MARGIN_LIQUIDITY_BOUND = 2^52` × `MAX_OPEN_LONGS`, emits `MarketRiskParamsSet`); `factory::require_admin`; `risk::required_margin_with` (shared math, `required_margin` delegates); error `InvalidRiskParams` (6034, appended); `tests/pause-admin.ts` (17); `apps/web` `yarn pause-market` / `unpause-market` / `set-risk-params`.
