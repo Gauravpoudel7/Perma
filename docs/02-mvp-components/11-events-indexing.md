@@ -16,13 +16,13 @@ This component is entirely off-chain. It mirrors the state of the `Position`, `M
 ## Public Interface (API)
 
 ### `GET /positions/{user}`
-- **Returns**: List of all active positions for the user, including calculated current P&L.
+- **Returns**: List of all active positions for the user. *(No on-chain P&L exists to surface — Fair MVP values nothing against a price; see ADR-0003.)*
 
 ### `GET /market/{pool}`
 - **Returns**: Current short liquidity inventory and premium rate.
 
 ### `GET /user/{user}/collateral`
-- **Returns**: Current balances and solvency status.
+- **Returns**: Current balances (`balance_*`, `locked_*`, `premium_owed_usdc`, `open_positions`). *(A solvency figure arrives with component 09's margin fields.)*
 
 ## Algorithms & Pseudocode
 
@@ -35,10 +35,15 @@ async function indexLoop() {
         const events = parseEvents(tx.logs);
         
         for (const event of events) {
-            if (event.type === 'PositionMinted') {
+            // Live event names (programs/perma/src/lib.rs): ShortMinted, LongMinted, ShortBurned, LongBurned,
+            // PremiumSettled, PositionOpened/PositionClosed + LiquidityAdded/LiquidityRemoved (adapter harness),
+            // CollateralDeposited/Withdrawn/Locked/Unlocked, MarketCreated, GlobalConfigInitialized, RangeValidated.
+            if (event.type === 'ShortMinted' || event.type === 'LongMinted') {
                 await db.positions.insert(event.data);
-            } else if (event.type === 'PositionBurned') {
-                await db.positions.update(event.data.id, { status: 'Closed' });
+            } else if (event.type === 'ShortBurned') {
+                await db.positions.update(event.data.permaPosition, { status: event.data.status }); // Closed or PendingPremium
+            } else if (event.type === 'LongBurned') {
+                await db.positions.update(event.data.permaPosition, { status: 'Closed' });
             }
             // ... other events
         }
@@ -68,6 +73,6 @@ async function indexLoop() {
 - `IndexerError(slot, error)`
 
 ## MVP Done Definition
-- [ ] Basic listener for `PositionMinted` and `PositionBurned` events.
+- [ ] Basic listener for `ShortMinted` / `LongMinted` / `ShortBurned` / `LongBurned` / `PremiumSettled`.
 - [ ] Simple API providing current position lists for users.
 - [ ] Integration with the frontend "Portfolio" view.

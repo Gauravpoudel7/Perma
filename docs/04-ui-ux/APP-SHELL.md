@@ -19,13 +19,21 @@ The app uses a **Fixed Side-Nav** and a **Main Stage** approach, similar to Line
 
 ### 2. Portfolio View
 - **Active Positions Table**:
-    - Position ID | Type | Range | Size | Unrealized P&L | Premium Accrued | Action: [Close].
-- **Collateral Summary Card**:
-    - Total Balance | Locked | Available | Solvency Ratio (%).
+    - Side | Range | Size | Accrued Premium (Est.) | Status (Open / Pending Premium) | Action: [Close] / [Settle].
+    - **No P&L column.** No P&L instruction exists on-chain — a short's realized LP result
+      (`returned − locked`) is applied once, at close, and a long always closes at P&L = 0
+      (see [ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)). There is nothing "unrealized"
+      to show for either leg.
+- **Collateral Summary Card** (Vault, not Portfolio — implemented at `apps/web/src/app/vault`):
+    - Deposited | Locked | Available | **Required free USDC** (a real µUSDC amount:
+      `premium_owed_usdc + Σ(accrued + margin)` over open longs). **Not a "Solvency Ratio (%)"**
+      — Fair MVP reads no price, so no ratio can be honestly computed (ADR-0003).
 
 ### 3. Earn/Collateral View
 - **Deposit Interface**: Simple SOL/USDC input fields $\rightarrow$ [Deposit].
-- **Withdraw Interface**: Amount field $\rightarrow$ [Withdraw] (with solvency check warning).
+- **Withdraw Interface**: Amount field $\rightarrow$ [Withdraw] (blocked live, before submission, when the
+  amount would leave less than the owner's open longs owe — the exact `InsolventWithdrawal` gate,
+  not a heuristic warning).
 
 ## Interaction Details
 - **Transaction Toasts**: Bottom-right notifications. 

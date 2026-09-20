@@ -33,7 +33,7 @@ Enforced by [`RELEASE-GATE.md`](../06-testing/RELEASE-GATE.md) §Quality & Compl
 | **Real liquidity** | A PERMA short is an Orca Whirlpool position, not a synthetic exposure. | Every short CPIs `increase_liquidity_v2`; the position is verifiable on an explorer. |
 | **No expiry** | Positions carry a streaming premium instead of an expiry date. | Premium accumulator in [`07-premium-engine.md`](../02-mvp-components/07-premium-engine.md). |
 | **Inventory-capped** | A long can only be opened against short liquidity that already exists. | Enforced on-chain; rejects with `NoShortInventory`. |
-| **Solvency-gated** | Mints and withdrawals are blocked when they would leave a position under-collateralized. | Checked on both paths per [`09-risk-solvency.md`](../02-mvp-components/09-risk-solvency.md). |
+| **Fully collateralized shorts** | A short's collateral is locked for exactly what Orca took, and stays locked until the position closes. | Enforced on-chain; `unlock` refused while a short is open (`PositionsOutstanding`). *(A "solvency-gated" pillar is reserved for when [component 09](../02-mvp-components/09-risk-solvency.md) ships — do not use it before then.)* |
 
 Every pillar states a mechanism that exists in the MVP. Do not add a pillar that the program does not enforce.
 
@@ -54,7 +54,7 @@ Every pillar states a mechanism that exists in the MVP. Do not add a pillar that
 
 ### Mechanism section
 
-> A short seller picks a price range and a size. PERMA deposits the matching SOL and USDC into the allowlisted Whirlpool as concentrated liquidity and records the position. A buyer can open a long only against short liquidity that already exists in that range, and pays premium continuously while the position is open. Closing settles accrued premium and P&L back into collateral.
+> A short seller picks a price range and a size. PERMA deposits the matching SOL and USDC into the allowlisted Whirlpool as concentrated liquidity and records the position. A buyer can open a long only against short liquidity that already exists in that range, and pays premium continuously while the position is open. Closing settles accrued premium back into collateral; a short also gets back whatever Orca returns for its liquidity.
 
 ### Honesty constraints
 
@@ -95,13 +95,18 @@ Screens follow [`WIREFRAMES.md`](WIREFRAMES.md).
 | Element | Copy |
 |---|---|
 | Header | "Your Positions" |
-| Columns | "Position" · "Side" · "Range" · "Size" · "P&L" · "Accrued Premium" |
-| Premium column note | "Premium accrues continuously and settles when you close." |
-| Row action | "Close" |
+| Columns | "Side" · "Range" · "Size" · "Accrued Premium" · "Status" — **no "P&L" column**: no P&L instruction exists on-chain; a short's realized LP result is applied once, at close, and a long always closes at P&L = 0 ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)) |
+| Premium column note | "Premium accrues continuously and settles when you close." Values shown are labeled "Est." |
+| Status values | "Open" · "Pending Premium" (a short's claim outran the escrow, carried until a long settles) |
+| Row action | "Close" (short, or a long with nothing owed) · "Settle" (a long with a positive accrued amount — routes to `settle_premium`, not burn) |
 | Empty state | "No open positions. Open a short to provide liquidity, or a long to buy against existing short inventory." |
-| Summary row | "Collateral" · "Locked" · "Available" · "Solvency Ratio" |
-| Closing | "Settling premium and P&L…" |
-| Closed | "Position closed. Premium and P&L settled to collateral. View transaction" |
+| Closing | "Settling premium…" |
+| Closed | "Position closed. Premium settled to collateral. View transaction" |
+
+Collateral summary — "Deposited" · "Locked" · "Available" · **"Required free USDC"** — lives on
+the **Vault** screen (§4.3), not Portfolio. It is a real µUSDC amount
+(`premium_owed_usdc + Σ(accrued + margin)` over open longs), never a "Solvency Ratio" — Fair
+MVP reads no price, so a ratio would have to be invented (ADR-0003).
 
 **Banner:** required, persistent.
 
@@ -113,7 +118,8 @@ Screens follow [`WIREFRAMES.md`](WIREFRAMES.md).
 | Balance label | "Deposited" / "Locked by open positions" / "Available to withdraw" |
 | Deposit CTA | "Deposit" |
 | Withdraw CTA | "Withdraw" |
-| Solvency block | "This withdrawal would leave an open position under-collateralized. Reduce the amount or close a position first." |
+| Insufficient block | "You can only withdraw free collateral. Close a position to release locked funds." *(`InsufficientFunds`)* |
+| Solvency block *(component 09)* | "This withdrawal would leave less than your open longs owe in premium. Settle or close a long first." *(`InsolventWithdrawal`)* |
 | Asset note | "SOL and USDC only. This market accepts no other collateral." |
 | Success | "Deposit confirmed. View transaction" |
 

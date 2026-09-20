@@ -1,0 +1,39 @@
+@import "../styles/tokens.css";
+
+/* next/font (self-hosted Google Fonts, no runtime CDN request) generates its
+   own CSS variable per font; wire those in as the PRIMARY family ahead of
+   the static fallback stack tokens.css declares, so the token stays the
+   documented fallback chain rather than a second source of truth. */
+:root {
+  --font-sans: var(--font-sans-loaded), "Geist Sans", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: var(--font-mono-loaded), "Geist Mono", ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, monospace;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  border-color: var(--color-border);
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+body {
+  min-height: 100dvh;
+}
+
+/* Never a data table, form label, or button in serif — BRAND-SYSTEM.md rule. */
+table,
+label,
+button,
+input {
+  font-family: var(--font-sans);
+}

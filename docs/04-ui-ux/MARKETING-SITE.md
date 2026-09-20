@@ -14,7 +14,7 @@
 
 ### 2. The Thesis (The "Why")
 - **Layout**: Split screen. Left: Large serif headline. Right: Concise bullet points.
-- **Copy** (`COPY-DECK.md` §3 "Mechanism section"): "A short seller picks a price range and a size. PERMA deposits the matching SOL and USDC into the allowlisted Whirlpool as concentrated liquidity and records the position. A buyer can open a long only against short liquidity that already exists in that range, and pays premium continuously while the position is open. Closing settles accrued premium and P&L back into collateral."
+- **Copy** (`COPY-DECK.md` §3 "Mechanism section"): "A short seller picks a price range and a size. PERMA deposits the matching SOL and USDC into the allowlisted Whirlpool as concentrated liquidity and records the position. A buyer can open a long only against short liquidity that already exists in that range, and pays premium continuously while the position is open. Closing settles accrued premium back into collateral; a short also gets back whatever Orca returns for its liquidity."
 
 ### 3. How It Works (The "Mechanism")
 - **Interactive Diagram**: A simplified view of the Short $\rightarrow$ Long loop.
@@ -22,7 +22,7 @@
     1. **Provide**: Short a range $\rightarrow$ Add liquidity to Orca.
     2. **Utilize**: Long a range $\rightarrow$ Claim existing short liquidity.
     3. **Accrue**: Stream premium based on time and size.
-    4. **Settle**: Close position $\rightarrow$ Settle P&L.
+    4. **Settle**: Close position $\rightarrow$ premium settled in cash.
 
 ### 4. Architecture Snapshot
 - **Visual**: A clean, technical diagram showing the connection between `PERMA` $\rightarrow$ `Orca` $\rightarrow$ `Solana`.

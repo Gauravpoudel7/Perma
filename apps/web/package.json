@@ -1,0 +1,42 @@
+{
+  "name": "@perma/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PERMA Fair MVP web UI \u2014 Trade / Portfolio / Vault. Prototype. Not audited. Single pool. Not production mainnet risk capital.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check-copy": "node scripts/check-banned-phrases.mjs",
+    "verify-live": "tsx scripts/verify-live.ts",
+    "verify-mint-long": "tsx scripts/verify-mint-long.ts",
+    "verify-withdraw-and-burn": "tsx scripts/verify-withdraw-and-burn.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/wallet-adapter-base": "^0.9.23",
+    "@solana/wallet-adapter-react": "^0.15.35",
+    "@solana/web3.js": "^1.98.0",
+    "bn.js": "^5.2.1",
+    "next": "^14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.1.6",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "tsx": "^4.23.15",
+    "typescript": "^5.5.3",
+    "vitest": "^1.6.0"
+  }
+}

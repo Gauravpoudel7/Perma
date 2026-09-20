@@ -15,7 +15,7 @@ The user selects a price range and a size. Upon confirmation, their collateral i
 This component leverages the `Position` and `UserCollateral` PDAs.
 
 ## Public Interface
-This is implemented as a specific path within the `mint_options` instruction.
+This is implemented as a specific path within the `mint_position` instruction.
 
 ## Algorithms & Pseudocode
 
@@ -23,7 +23,8 @@ This is implemented as a specific path within the `mint_options` instruction.
 ```rust
 fn execute_short_mint(user, range, size) {
     // 1. Calculate required assets based on range and size
-    //    - assets = clmm_adapter.calculate_required_assets(range, size);
+    //    - PERMA does not quote Whirlpool math on-chain. The client supplies token_max_a/b;
+    //      the handler measures the vault deltas around the CPI and locks the OBSERVED spend.
     
     // 2. Lock assets in Collateral Manager
     //    - collateral_manager.lock(user, assets);
@@ -34,8 +35,8 @@ fn execute_short_mint(user, range, size) {
     // 4. Initialize Position PDA
     //    - position_engine.create_position(user, SHORT, range, size);
     
-    // 5. Set entry premium index
-    //    - position.entry_index = premium_engine.get_current_index();
+    // 5. Checkpoint premium entitlement (shorts use the RANGE accumulator, not the global index)
+    //    - position.entry_acc_q64 = range.acc_premium_per_short_q64;   // after poke_range, before total_short += L
 }
 ```
 
@@ -43,20 +44,20 @@ fn execute_short_mint(user, range, size) {
 - **Asset Backing**: A Short position cannot exist without the corresponding assets being locked in the `Collateral Manager` and deposited in the `Whirlpool`.
 
 ## Failure Modes & Errors
-- **`InsufficientCollateral`**: User does not have enough SOL/USDC to cover the requested size.
-- **`SlippageError`**: The assets required for the range changed significantly during the transaction.
+- **`InsufficientFunds`**: free balance does not cover `token_max_a` / `token_max_b`.
+- **`SlippageExceeded`**: the observed spend breached `token_max_a` / `token_max_b`.
 
 ## Security Notes
 - **Atomic Execution**: The lock and the CPI call must be in the same transaction. If the Orca call fails, the lock must be reverted.
-- **Rounding**: Rounding must always favor the protocol when locking assets.
+- **Locked = observed spend, exactly.** Nothing is rounded: the handler locks precisely what the vault deltas show Orca took, so conservation holds to the unit.
 
 ## Test Cases
 - **Success**: Mint short $\rightarrow$ Check `UserCollateral.locked` increased $\rightarrow$ Check Whirlpool liquidity increased.
-- **Failure**: Mint short with 0 collateral $\rightarrow$ Expect `InsufficientCollateral`.
+- **Failure**: Mint short with 0 collateral $\rightarrow$ Expect `InsufficientFunds`.
 
 ## Observability & Events
-- `ShortMinted(user, range, size, assets_locked)`
+- `ShortMinted { market, owner, perma_position, orca_position, tick_lower, tick_upper, liquidity, locked_a, locked_b, open_positions }`
 
 ## MVP Done Definition
-- [ ] Successful integration of `CollateralManager.lock` $\rightarrow$ `CLMMAdapter.add_liquidity`.
-- [ ] Correct calculation of required assets for a given range and size.
+- [x] Successful integration of `CollateralManager.lock` $\rightarrow$ `CLMMAdapter.add_liquidity`, atomically in `mint_position`. *(04/05)*
+- [x] Required assets are **observed** from vault deltas, not quoted on-chain; the client supplies `token_max_*` slippage caps. *(04/05)*

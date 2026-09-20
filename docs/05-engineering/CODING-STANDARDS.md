@@ -1,7 +1,7 @@
 # CODING STANDARDS: PERMA
 
 ## Rust (On-Chain)
-- **Error Handling**: Use custom `ErrorCode` enums for all failure paths. No `unwrap()` or `expect()` in production logic.
+- **Error Handling**: Use the `PermaError` enum in `errors.rs` for all failure paths. No `unwrap()` or `expect()` in production logic.
 - **Integer Precision**: 
     - No floating point math.
     - Use `u64` for balances and `u128` for intermediate premium calculations.

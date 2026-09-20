@@ -20,7 +20,7 @@ Pixel values below are the resolved sizes of [`BRAND-SYSTEM.md`](BRAND-SYSTEM.md
 - **Layout**:
     - Label: 12px, Muted Gray, Sans.
     - Value: 24px, White, Sans (or Serif for key metrics).
-- **Example**: "Current Solvency: 142%".
+- **Example**: "Required free USDC: 51.00 USDC" — a real computed amount, never a percentage (Fair MVP solvency reads no price, so a ratio would have to be invented; see [ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)).
 
 ### 3. Range Slider (Tick Selector)
 - **Track**: 4px height, `#262626`.
@@ -32,9 +32,10 @@ Pixel values below are the resolved sizes of [`BRAND-SYSTEM.md`](BRAND-SYSTEM.md
 - **Header**: Muted gray, uppercase, 11px, Bold.
 - **Row**: Border-bottom 1px `#262626`.
 - **Typography**: Monospace for IDs and sizes; Sans for labels.
-- **P&L Colors**: 
-    - Positive: `#10B981`.
-    - Negative: `#EF4444`.
+- **Status Colors** (Badge, not a P&L figure — no P&L instruction exists on-chain):
+    - Open: neutral/muted.
+    - Pending Premium: `#EF4444` — a short whose claim outran the range's escrow, carried
+      until a long settles (see `08-burn-settle.md` §E).
 
 ### 5. Toast Notification
 - **Position**: Bottom-right.

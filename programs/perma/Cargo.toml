@@ -1,0 +1,28 @@
+[package]
+name = "perma"
+version = "0.1.0"
+description = "PERMA - perpetual options powered by Solana liquidity (Fair MVP)"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "perma"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+# `init-if-needed` powers deposit_collateral creating UserCollateral on first
+# use. Re-init attacks are blocked two ways: the PDA seeds bind the account to
+# the signer, and the handler only writes identity fields when owner == default.
+anchor-lang = { version = "1.2.0", features = ["init-if-needed"] }
+# Orca Whirlpool CPI via the code-generated client.
+# NOTE: the optional "anchor" feature is deliberately NOT enabled - its open
+# `anchor-lang = ">=0.31"` range resolves to a SECOND anchor-lang in the graph.
+# See docs/audits/IMPL-01-FEASIBILITY.md section 3.
+orca_whirlpools_client = { version = "8.0.0", default-features = false }

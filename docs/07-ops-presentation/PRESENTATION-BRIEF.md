@@ -11,9 +11,9 @@ Convince the judges that PERMA is a professional-grade volatility primitive that
 5. **The Vision**: From 1-leg SOL/USDC $\rightarrow$ 2-4 legs, spreads/straddles $\rightarrow$ Permissionless factory.
 
 ## Key Talking Points
-- **Not a Toy**: Emphasize the margin solvency system and the "Institutional Precision" design.
+- **Not a Toy**: Emphasize that every short is real Orca liquidity, every premium payment is a real USDC transfer into an on-chain escrow, and the "Institutional Precision" design.
 - **Real-World Impact**: Explain how PERMA deepens liquidity for the underlying CLMM (Orca).
-- **Risk Management**: Highlight the TWAP-based solvency checks and the admin pause mechanism.
+- **Risk Management**: Highlight the on-chain inventory gate (`NoShortInventory`), the conservation identities reconciled from outside the program, and the honest boundary — no liquidation, no price oracle in Fair MVP ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)). Do **not** claim TWAP checks or a pause mechanism; neither exists.
 
 ## Visual Aids
 - **Architecture Diagram**: Show the flow from User $\rightarrow$ PERMA $\rightarrow$ Orca.

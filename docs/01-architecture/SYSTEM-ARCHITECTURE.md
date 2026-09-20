@@ -9,7 +9,7 @@ PERMA is designed as a modular system that bridges Solana's high-performance run
 `User` $\rightarrow$ `Collateral Manager` (Lock Assets) $\rightarrow$ `Position Engine` (Mint Short) $\rightarrow$ `CLMM Adapter` (CPI to Orca) $\rightarrow$ `Orca Whirlpool` (Liquidity Added).
 
 ### 2. The Long Cycle (Liquidity Utilization)
-`User` $\rightarrow$ `Risk Engine` (Solvency Check) $\rightarrow$ `Position Engine` (Check Inventory) $\rightarrow$ `Market` (Update Inventory) $\rightarrow$ `Position Engine` (Mint Long).
+`User` $\rightarrow$ `Risk Engine` (Solvency Check: open-long liability + margin) $\rightarrow$ `Position Engine` (Check Inventory) $\rightarrow$ `Market` (Update Inventory) $\rightarrow$ `Position Engine` (Mint Long).
 
 ### 3. The Premium Cycle (Streaming)
 `GlobalPremiumIndex` $\rightarrow$ Updates via `mint/burn` or `poke` $\rightarrow$ `Position Engine` (Calculates $\Delta$ index) $\rightarrow$ `Burn/Settle` (Distributes P&L).

@@ -17,7 +17,7 @@ The code is the final truth, but the documentation must be the **primary map**.
 4. **Verify**: Ensure the updated doc still aligns with the `MVP-SCOPE.md`.
 
 ## Documentation Maintenance
-- **Broken Link Check**: A `docs-check.sh` script is run in CI to find broken internal links.
+- **Broken Link Check**: A `docs-check.sh` script (planned — not yet written; no CI exists) would be run to find broken internal links.
 - **Review Cycle**: Every major release candidate requires a "Doc Review" as part of the PR checklist.
 
 ---

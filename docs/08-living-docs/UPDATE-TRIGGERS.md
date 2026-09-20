@@ -7,7 +7,7 @@ Any PR that modifies the following must update the related docs:
 - **Instruction Signature** $\rightarrow$ Update `INSTRUCTIONS.md` and `CLIENT-SDK.md`.
 - **Account Layout/PDA Seeds** $\rightarrow$ Update `ONCHAIN-ARCHITECTURE.md` and the relevant Component Spec.
 - **Math/Economic Logic** $\rightarrow$ Update `FIXTURES-AND-VECTORS.md` and the relevant Component Spec.
-- **Risk Params** $\rightarrow$ Update `S-S-S` (Security Baseline) and `THREAT-MODEL.md`.
+- **Risk Params** $\rightarrow$ Update `SECURITY-BASELINE.md` and `THREAT-MODEL.md`.
 
 ## 2. Scope Shifts
 - **Feature Addition**: If a "Stretch Goal" is implemented or a new feature is added $\rightarrow$ Update `MVP-SCOPE.md`.

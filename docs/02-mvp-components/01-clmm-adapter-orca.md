@@ -35,7 +35,18 @@ Invisible to the user. When a user opens a SHORT, the adapter creates a real Orc
 | Source of truth | [`orca-so/whirlpools`](https://github.com/orca-so/whirlpools) |
 | **Pinned commit** | `408c945fef4c49ab70def4303377cfaf8f0f3c99` (2026-09-03) |
 | Instruction family targeted | **v2** (`increase_liquidity_v2`, `decrease_liquidity_v2`, `collect_fees_v2`) |
-| Crate for CPI | `whirlpool` program crate with the `cpi` feature, pinned to the commit above |
+| Crate for CPI | **`orca_whirlpools_client` v8.0.0** (crates.io), `default-features = false` |
+
+> **CPI crate change.** ADR-0001 originally specified the `whirlpool` program crate with `features = ["cpi"]`. That is not buildable: the program crate exact-pins `anchor-lang = "=0.32.1"` and `solana-program = "=2.2.1"`, which cannot coexist with a PERMA program on a different Anchor version. PERMA uses the **code-generated client** instead — same program, same discriminators, same account order, generated from this commit. Do **not** enable the client's optional `anchor` feature: its open `anchor-lang = ">=0.31"` range pulls a second `anchor-lang` into the graph. Full analysis in [`IMPL-01-FEASIBILITY.md`](../audits/IMPL-01-FEASIBILITY.md) §3.
+
+### Toolchain (verified working)
+
+| Tool | Pin |
+|---|---|
+| Rust | `1.98.1` stable |
+| Anchor CLI / `anchor-lang` | `1.2.0` |
+| Agave / Solana CLI | `3.0.0`+ |
+| SBPF target | **`v0`** — build with `anchor build --arch v0`; the default `v3` is rejected by the local validator's loader |
 
 **Sources for every account table below** (paths relative to the pinned commit):
 
@@ -110,7 +121,7 @@ PERMA uses **one Orca position per PERMA short**. There is no shared or netted O
 
 **Remaining accounts:** Orca parses `remaining_accounts_info` as `RemainingAccountsInfo` (transfer-hook accounts for mint A / mint B). SOL and USDC have no transfer hooks, so **PERMA MVP always passes `None` and zero remaining accounts.** See §E.
 
-**`token_max_a` / `token_max_b`** are the slippage guard. PERMA computes them from the quoted amounts plus the market's configured slippage bps; exceeding them yields Orca `TokenMaxExceeded`.
+**`token_max_a` / `token_max_b`** are the slippage guard. **The client supplies them** — PERMA does not quote Whirlpool math on-chain and `Market` carries no slippage parameter. Free balance must cover the caps; what gets *locked* is the observed spend. Exceeding a cap yields Orca `TokenMaxExceeded`, surfaced as `SlippageExceeded`.
 
 ### B.3 `decrease_liquidity_v2` — remove liquidity for a short
 
@@ -222,6 +233,8 @@ price_raw = P * 10^(dec_b - dec_a)
 tick_exact = ln(price_raw) / ln(1.0001)
 ```
 
+> **Illustrative only.** The example below uses `tick_spacing = 64`. The **allowlisted pool has `tick_spacing = 8`** — see §C.3a for the real numbers. `tick_spacing` is read from the live `Whirlpool` account and stored on the `Market` PDA at `create_market` ([`02-factory-allowlisted-market.md`](02-factory-allowlisted-market.md) §A). The **formulas are spacing-agnostic**; only the integers change.
+
 **Worked example — SOL/USDC, `dec_a = 9` (WSOL), `dec_b = 6` (USDC), so the factor is `10^-3`:**
 
 | Human price `P` | `price_raw` | `tick_exact` |
@@ -273,6 +286,42 @@ Continuing the example (`tick_spacing = 64`, `ticks_in_array = 5632`):
 
 Orca validates a start index with `check_is_valid_start_tick`: it must be a multiple of `ticks_in_array`. Both `-22528` and `-16896` satisfy `start % 5632 == 0` ✅.
 
+### C.3a The real allowlisted pool (`tick_spacing = 8`)
+
+These are the **authoritative** numbers — the ones the tests assert against. Pool `2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G`, WSOL (9 dp) / devUSDC (6 dp), live price ≈ **$19.97/SOL** at selection. The `$180–$220` figures above belong to a hypothetical spacing-64 pool and do not apply here.
+
+```
+ticks_in_array = 88 × 8 = 704          (not 5632)
+```
+
+Demo range **$18.00 – $22.00**, straddling the live tick `-39140`:
+
+| Bound | Requested | Exact tick | Aligned | Realized price | TickArray start | PDA seed |
+|---|---|---|---|---|---|---|
+| lower | $18.00 | `-40175.8439` | **`-40176`** | 17.9997 | **`-40832`** | `"-40832"` |
+| upper | $22.00 | `-38169.0366` | **`-38168`** | 22.0023 | **`-38720`** | `"-38720"` |
+
+Distinct arrays, so both must be passed. Checks: `-40176 % 8 == 0`, `-38168 % 8 == 0`, `-40832 % 704 == 0`, `-38720 % 704 == 0`, and `-40176 < -39140 < -38168` (in range).
+
+Narrow same-array case: `[-39184, -39104]` → both in array **`-39424`**; pass the same pubkey twice.
+
+Resolved TickArray addresses (all initialized on devnet):
+
+| Start | Address |
+|---|---|
+| `-40832` | `86pYzhWoHDwaKbYMbM4gNC7EQTQgbv8WTG5rRjVNH571` |
+| `-38720` | `49ixSQnGC2AEzgwQAeHkDnLYJYKtB2c9rSgpb7PncFPv` |
+| `-39424` | `ACkArMv6JBtNTM64qLYnNirkMyWgYHUJ9x6CMbLPKZGy` |
+
+**`div_euclid` is mandatory** — every realistic tick here is negative, and truncation picks the wrong array every time:
+
+| tick | `div_euclid` ✅ | truncating `/` ❌ |
+|---|---|---|
+| `-40176` | `-40832` | `-40128` |
+| `-38168` | `-38720` | `-38016` |
+| `-39140` | `-39424` | `-38720` |
+| `-1` | `-704` | `0` |
+
 ### C.4 TickArray PDA seeds — exact
 
 ```rust
@@ -299,11 +348,11 @@ Source: `programs/whirlpool/src/instructions/initialize_tick_array.rs`, identica
 | Array exists but the specific tick was never initialized | Fine — Orca initializes the individual `Tick` inside the array during `increase_liquidity_v2` |
 | Removing liquidity / closing | Arrays necessarily already exist (they were created to open); never init on the close path |
 
-**PERMA does not CPI `initialize_tick_array` from inside `mint_options`.** Rationale: rent payment, compute budget, and failure attribution all get muddier inside a CPI, and a failed init would abort the whole mint. Instead:
+**PERMA does not CPI `initialize_tick_array` from inside `mint_position`.** Rationale: rent payment, compute budget, and failure attribution all get muddier inside a CPI, and a failed init would abort the whole mint. Instead:
 
 1. The client SDK derives both array PDAs and checks whether they exist.
 2. Any missing array is created by a **separate preceding instruction** in the same transaction, funded by the user.
-3. `mint_options` validates the arrays exist and are correct, and returns `TickArrayNotInitialized` if not — it never creates them.
+3. `mint_position` validates the arrays exist and are correct, and returns `TickArrayNotInitialized` if not — it never creates them.
 
 On devnet the relevant arrays around spot usually exist already (Orca's own LPs created them); arrays far from spot usually do not.
 
@@ -405,7 +454,7 @@ pub fn add_liquidity_for_short(
 | **Outputs** | `LiquidityDelta { liquidity_added: u128, amount_a: u64, amount_b: u64 }` |
 | **Accounts** | §B.1 (first open only) then §B.2 |
 | **Invariants** | `position.liquidity` increases by exactly `liquidity`; `vault_a/b` decrease by the reported amounts; the Whirlpool's `liquidity` increases iff the range is in-range |
-| **CU note** | `increase_liquidity_v2` ≈ 60–90k CU including account loads. With `open_position` in the same tx, request **400,000 CU** via `ComputeBudgetProgram`. Add ~40k if a TickArray init instruction is bundled. |
+| **CU note** | **Measured** (01B): `increase_liquidity_v2` = **54 957 CU / 820 bytes / 20 accounts**; `open_position` = **81 964 CU / 654 bytes / 14 accounts**, run as a prior transaction. A 400 000 CU request is ample. The earlier "~80 bytes of headroom" figure was a pessimistic static estimate — the real transactions are well under the 1232-byte limit. |
 
 ```rust
 // 1. validate_before_cpi(...)                        // §C.8
@@ -440,9 +489,12 @@ pub fn remove_liquidity_for_short(
 | **Outputs** | `LiquidityDelta { liquidity_removed, amount_a, amount_b }` |
 | **Accounts** | §B.3, plus §B.4 and §B.6 when `close_after` |
 | **Invariants** | Never removes more than `position.liquidity`; withdrawn tokens land in PERMA vaults only |
-| **CU note** | Full close is 3 CPIs in one tx; request **600,000 CU**. If it does not fit, split `close_position` into a follow-up tx — it is safe to defer because an empty position holds no value. |
+| **CU note** | **Measured** (01B, local validator): `decrease_liquidity_v2` + `collect_fees_v2` = **86 500 CU / 821 bytes**; `close_position` = **29 562 CU / 442 bytes**. `close_position` is issued as its own instruction (`adapter_close_position`) because `position_authority` is a PDA only the program can sign for. |
 
-**Full-close sequence — exactly three steps, in this order:**
+**Full-close sequence — exactly three steps, in this order.** Steps 1–2 run inside
+`adapter_remove_liquidity(close_after = true)`; step 3 is the separate
+`adapter_close_position` instruction, because `position_authority` is a PDA that only
+the program can sign for — a client cannot issue it.
 
 ```
 1. decrease_liquidity_v2(position.liquidity, min_a, min_b, None)   // liquidity -> 0
@@ -477,18 +529,16 @@ For the example above, `sqrt_price_x64` at the range bounds:
 
 Useful as test fixtures for the conversion helpers.
 
-### D.4 `get_liquidity_in_range` — the long-mint gate
+### D.4 `RangePremiumState::available_short_liquidity()` — the long-mint gate
 
 ```rust
-pub fn get_liquidity_in_range(
-    market: &Account<Market>,
-    inventory: &Account<RangeInventory>,
-    tick_lower: i32,
-    tick_upper: i32,
-) -> Result<u128>
+impl RangePremiumState {
+    /// total_short_liquidity − total_long_liquidity, saturating. Derived; never stored.
+    pub fn available_short_liquidity(&self) -> u128
+}
 ```
 
-Returns **PERMA-owned short liquidity** for the exact range, read from PERMA's `RangeInventory` PDA — *not* from `whirlpool.liquidity`. The Whirlpool aggregates every LP on Orca; selling longs against liquidity PERMA does not control would break the inventory invariant. The long-mint path rejects with `NoShortInventory` when `requested > available`. Owned by [06-long-mint-inventory.md](06-long-mint-inventory.md); the adapter only exposes the read.
+Returns **PERMA-owned short liquidity** for the exact range, read from PERMA's `RangePremiumState` PDA (`["range", market, lower_le, upper_le]`) — *not* from `whirlpool.liquidity`. The Whirlpool aggregates every LP on Orca; selling longs against liquidity PERMA does not control would break the inventory invariant. The long-mint path rejects with `NoShortInventory` when `requested > available`. Owned by [06-long-mint-inventory.md](06-long-mint-inventory.md); the adapter only exposes the read.
 
 ---
 
@@ -522,9 +572,9 @@ Orca error codes below are from `programs/whirlpool/src/errors.rs` at the pinned
 | `UnexpectedRemainingAccounts` | Caller injected extra accounts | — (caught pre-CPI) |
 | `SlippageExceeded` | Actual amounts breached the caps | `TokenMaxExceeded` `0x1781` / `TokenMinSubceeded` `0x1782` |
 | `ClosePositionNotEmpty` *(propagated)* | Close attempted with liquidity or fees outstanding | `ClosePositionNotEmpty` `0x1775` |
-| `CPIFailure` | Any unmapped Orca error — e.g. `LiquidityZero` `0x177c`, `InvalidTickSpacing` `0x1774`, `InvalidTickArraySequence` `0x1787` | various — log the raw Orca code |
+| *(propagated raw)* | Any unmapped Orca error — e.g. `LiquidityZero` `0x177c`, `InvalidTickSpacing` `0x1774`, `InvalidTickArraySequence` `0x1787` | the Orca code itself |
 
-Unmapped Orca errors must be logged verbatim (`msg!`) before being folded into `CPIFailure`, so failures stay diagnosable from transaction logs.
+Unmapped Orca errors **propagate unmapped** — there is no `CPIFailure` wrapper. The raw Orca code appears in the transaction logs, which is what the `0x1775` / `0x177c` regression guards in `tests/adapter-liquidity.ts` assert on.
 
 ## Security Notes
 
@@ -532,7 +582,7 @@ Unmapped Orca errors must be logged verbatim (`msg!`) before being folded into `
 - **Whirlpool address allowlist.** MVP has exactly one market. The pool address is fixed at `create_market` and stored on the Market account; the adapter never accepts a pool from instruction data.
 - **No arbitrary remaining accounts.** `RemainingAccountsInfo` is Orca's transfer-hook channel. Because SOL/USDC have no hooks, MVP passes `None` and asserts `remaining_accounts.is_empty()`. Accepting caller-supplied remaining accounts would let an attacker route token transfers through an arbitrary hook program.
 - **Position ownership.** The position NFT lives in an ATA owned by `market_authority`. A user can never hold, transfer, or independently close a PERMA short's Orca position; Orca's own `verify_position_authority` then guarantees only PERMA can modify it.
-- **Tick / price manipulation.** `tick_current_index` and `sqrt_price` are instantaneous and manipulable within a single transaction by anyone who can move the pool. They are therefore usable for **range gating and display only**. Any settlement or solvency figure that depends on price must come from the TWAP path in [09-risk-solvency.md](09-risk-solvency.md), with the deviation check that raises `OracleDeviationTooHigh`. The adapter must not expose a "current price" helper that invites settlement use.
+- **Tick / price manipulation.** `tick_current_index` and `sqrt_price` are instantaneous and manipulable within a single transaction by anyone who can move the pool. They are therefore usable for **range gating and display only**. **Fair MVP has no settlement or solvency figure that depends on price** — solvency is token balances plus premium liability, no price input ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)). Note that Orca Whirlpool exposes **no TWAP**: `orca_whirlpools_client` 8.0.0 has no observation array, and the `Oracle` PDA is adaptive-fee state, so a manipulation-resistant price cannot be built from the pool alone. Any future price-dependent operation (Part B) needs an external source first; `OracleDeviationTooHigh` is reserved for that and is not defined today. The adapter must not expose a "current price" helper that invites settlement use.
 - **Rent griefing.** TickArray init is user-funded and non-refundable while the array holds initialized ticks. The UI must disclose the one-time cost when a range requires a new array.
 - **Reentrancy.** Solana's account-locking model plus Anchor's mutable borrow rules prevent CPI reentry into PERMA; regardless, all PERMA state is written **after** the CPI returns and is reconciled against observed deltas.
 
@@ -560,8 +610,8 @@ Run against `solana-test-validator` with the Whirlpool program and the allowlist
 ```rust
 LiquidityAdded   { market, perma_position, orca_position, tick_lower, tick_upper, liquidity, amount_a, amount_b }
 LiquidityRemoved { market, perma_position, orca_position, liquidity, amount_a, amount_b, closed: bool }
-TickArrayRequired{ market, start_tick_index, tick_array }   // emitted when pre-flight finds a missing array
-FeesCollected    { market, perma_position, amount_a, amount_b }
+// TickArrayRequired / FeesCollected: NOT emitted. A missing array fails TickArrayNotInitialized (no event);
+// collected fees land in the vault deltas and surface as `returned_*` on ShortBurned.
 ```
 
 All amounts are observed post-CPI values. Indexed per [11-events-indexing.md](11-events-indexing.md).
@@ -573,7 +623,7 @@ All amounts are observed post-CPI values. Indexed per [11-events-indexing.md](11
 - [ ] Rejects missing / misaligned / out-of-bounds ticks before any CPI, with the mapped PERMA error.
 - [ ] Enforces the program-ID and whirlpool-address allowlists and the empty-remaining-accounts rule.
 - [ ] All Orca positions are authorized by `market_authority`; no user key is ever `position_authority`.
-- [ ] Full close runs the 4-step sequence and leaves no orphaned Orca position.
+- [ ] Full close runs the 3-step sequence (`decrease_liquidity_v2` → `collect_fees_v2` → `close_position`) and leaves no orphaned Orca position.
 - [ ] Reads `sqrt_price`, `tick_current_index`, `tick_spacing`, and `liquidity` from the live `Whirlpool` account, with no external oracle.
 - [ ] Every test in **Test Cases** passes on a local validator with cloned Orca accounts.
 

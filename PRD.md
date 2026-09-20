@@ -89,10 +89,11 @@ initialize_global_config()
 create_market()                 # allowlisted pool only
 deposit_collateral()
 withdraw_collateral()           # solvency-gated
-mint_options()                  # 1-leg long or short
-burn_options()                  # close + settle
-settle_premium()                # optional explicit settle
-poke_observations()             # pool observation / TWAP helper
+mint_position()                 # 1-leg long or short (shipped name)
+burn_position()                 # close + settle premium in cash
+settle_premium()                # explicit settle; long leg is a permissionless crank
+# (no standalone poke: the premium index refreshes inside mint/burn/settle.
+#  Orca Whirlpool has NO pool observations / TWAP - see ADR-0003.)
 ```
 
 Stretch (choose at most one package):
@@ -116,11 +117,11 @@ Factory (allowlisted)
 
 ## A7. MVP success criteria (Definition of Done)
 
-- [ ] One allowlisted Orca SOL/USDC market exists on-chain  
-- [ ] Alice can deposit collateral and open a short that **actually adds Whirlpool liquidity**  
-- [ ] Bob can open a long **only when** short liquidity exists; otherwise reject  
-- [ ] Premium accumulates on-chain and is visible in UI  
-- [ ] Close settles premium and updates collateral correctly  
+- [x] One allowlisted Orca SOL/USDC market exists on-chain *(local validator; devnet deploy pending)*  
+- [x] Alice can deposit collateral and open a short that **actually adds Whirlpool liquidity** *(`tests/position-short.ts`)*  
+- [x] Bob can open a long **only when** short liquidity exists; otherwise reject *(`NoShortInventory`, `tests/position-long.ts`)*  
+- [ ] Premium accumulates on-chain *(done — `GlobalPremiumIndex`)* and is visible in UI *(no UI yet)*  
+- [x] Close settles premium and updates collateral correctly *(in cash, `tests/settle-premium.ts`)*  
 - [ ] Solvency check blocks unsafe withdraw / oversize mint  
 - [ ] Demo video ≤3 min with live txs  
 - [ ] GitHub + README + “not audited” disclaimer  
@@ -273,6 +274,8 @@ AccountValue >= RequiredCollateral
 ### B5.5 Oracle-minimized with manipulation resistance
 Prefer CLMM pool price/tick and pool observations.
 
+> **Orca reality (verified 2026-09-20, `orca_whirlpools_client` 8.0.0):** Whirlpool exposes **spot only** — there is no observation array and no TWAP; the `Oracle` PDA is adaptive-fee state. So on Orca this policy needs an **external** price source (Pyth, or a PERMA-maintained ring) before any TWAP gate can exist. Fair MVP sidesteps it entirely: solvency reads no price ([ADR-0003](docs/adr/ADR-0003-fair-mvp-risk-model.md)). The gates below are Part B / Protocol V1 requirements, contingent on that source.
+
 For liquidation and other risk ops:
 
 ```text
@@ -367,7 +370,7 @@ Deterministic encoding of market + legs. Immutable after creation.
 Solana representation: **Position PDA**, not ERC-1155.
 
 ```text
-PDA(["position", market, owner, position_id])
+PDA(["perma_position", market, owner, nonce_le])   # shipped seeds
 ```
 
 Default MVP: **non-transferable**. Transfers only later with explicit solvency + premium settle rules.
@@ -435,9 +438,9 @@ Configurable opening commission (Panoptic V1 materials often cite ~10 bps in som
 
 ## B19. Mint / burn / exercise
 
-`mint_options` validates market, legs, ticks, long availability, collateral, then mutates CLMM + position + premium state atomically.
+`mint_position` validates market, legs, ticks, long availability, collateral, then mutates CLMM + position + premium state atomically.
 
-`burn_options` settles premium + P&L, restores liquidity as required, updates collateral, closes position.
+`burn_position` settles premium in cash, restores liquidity as required, updates collateral, closes position. (Fair MVP: short realized LP result is `returned − locked`; long P&L is 0 — no counterparty for intrinsic value until force-exercise exists.)
 
 Exercise settles economic outcome without a Black-Scholes engine. Payoffs come from liquidity/price/utilization mechanics.
 
@@ -488,7 +491,7 @@ remove_liquidity()
 collect_fees()
 swap()            # if required for ITM flows later
 get_position()
-get_observations()
+get_observations()   # NOT available on Orca Whirlpool - needs an external source
 ```
 
 **First adapter:** Orca Whirlpool.  
@@ -502,7 +505,7 @@ Market
 CollateralVault (per mint)
 UserCollateral
 Position
-OracleState / ObservationState
+OracleState / ObservationState   # Orca's Oracle PDA is adaptive-fee state, not a price ring
 ```
 
 Optimize after profiling. Respect CU, account, and tx size limits.
@@ -515,13 +518,13 @@ create_market()
 initialize_collateral()
 deposit_collateral()
 withdraw_collateral()
-mint_options()
-burn_options()
+mint_position()
+burn_position()
 exercise_options()
 settle_premium()
 force_exercise()
 liquidate_account()
-poke_observations()
+poke_observations()   # only meaningful with a PERMA-maintained ring or external oracle
 collect_fees()
 update_market_parameters()
 pause_market() / unpause_market()

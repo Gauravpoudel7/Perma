@@ -13,16 +13,20 @@
         - Size Input Field.
         - Long/Short Toggle.
         - [Open Position] Button.
-    - **Right Panel**: "Market Depth" (Mini-map of available short liquidity).
+    - **Right Panel**: *Descoped in the shipped MVP.* A cross-range depth map needs an
+      indexer over every `RangePremiumState` PDA (component 11, not built). The one honest
+      number available today — available short liquidity for the range currently selected —
+      is shown inline next to the Size Input instead of as a separate mini-map.
 
 ## Layout 2: The Portfolio View
 - **Sidenav (Left)**: (Same as above).
 - **Main Stage (Center)**:
     - **Header**: "My Active Positions".
-    - **Table**: 
-        - ID | Type | Range | P&L | Premium | [Close].
-    - **Bottom Summary**: 
-        - Total Collateral | Locked | Available | Solvency Ratio.
+    - **Table**:
+        - Side | Range | Size | Accrued Premium (Est.) | Status | [Close] / [Settle].
+        - No P&L column: no P&L instruction exists (long closes at 0; a short's realized LP
+          result is applied once, at close — see [ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)).
+      Collateral summary lives on the Vault screen (Layout 3), not here.
 
 ## Layout 3: The Vault View
 - **Sidenav (Left)**: (Same as above).
@@ -30,7 +34,8 @@
     - **Header**: "Asset Management".
     - **Deposit Card**: [Amount] [Token] $\rightarrow$ [Deposit].
     - **Withdraw Card**: [Amount] [Token] $\rightarrow$ [Withdraw].
-    - **Asset Breakdown**: SOL: X.XX | USDC: Y.YY.
+    - **Asset Breakdown**: Deposited | Locked by open positions | Available to withdraw |
+      **Required free USDC** (a real amount, not a "Solvency Ratio" — Fair MVP reads no price).
 
 ---
 

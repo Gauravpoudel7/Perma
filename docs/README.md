@@ -17,6 +17,7 @@ This repository contains the comprehensive specification for the protocol's arch
 - **[UI/UX Brand System](04-ui-ux/BRAND-SYSTEM.md)** — The visual identity and design language.
 - **[Release Gate](06-testing/RELEASE-GATE.md)** — Criteria for demo readiness.
 - **[ADR-0001](adr/ADR-0001-orca-cpi-instruction-surface.md)** — Orca CPI instruction surface and position ownership model.
+- **[ADR-0002](adr/ADR-0002-premium-accounting.md)** — Premium accounting: range bucket, pro-rata split, rounding policy.
 
 ## 📂 Document Map
 
@@ -32,7 +33,7 @@ This repository contains the comprehensive specification for the protocol's arch
 | **07 Ops** | Deployment & Demo | `RUNBOOK-DEVNET.md`, `PRESENTATION-BRIEF.md` |
 | **08 Living Docs** | Maintenance | `DOC-GOVERNANCE.md`, `CHANGELOG-POLICY.md` |
 | **ADR** | Architecture Decisions | [`adr/`](adr/) — numbered, immutable once Accepted |
-| **Audits** | Doc & Code Review | [`audits/`](audits/) — `DOCS-AUDIT-REPORT.md`, `DOCS-AUDIT-FIX-REPORT.md` |
+| **Audits** | Doc & Code Review | [`audits/`](audits/) — doc audits, plus a Phase 0 feasibility note and an implementation report per component (`IMPL-01`…`IMPL-08`) |
 
 ---
 

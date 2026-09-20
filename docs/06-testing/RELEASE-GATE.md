@@ -12,11 +12,13 @@ Confirm versions **before** anything else. Version drift is the most common caus
 
 | Tool | Pinned | Verify |
 |---|---|---|
-| Rust | `1.79.0` stable | `rustc --version` |
-| Solana CLI | `1.18.17` | `solana --version` |
-| Anchor | `0.30.1` | `anchor --version` |
-| Node.js | `20.11.0` LTS | `node --version` |
-| Yarn | `1.22.x` (Anchor's default test runner) | `yarn --version` |
+| Rust | `1.98.1` stable | `rustc --version` |
+| Solana CLI (Agave) | `3.0.0`+ | `solana --version` |
+| Anchor | `1.2.0` (`avm use 1.2.0`) | `anchor --version` |
+| Node.js | `24.11.1` | `node --version` |
+| Yarn | `1.22.x` | `yarn --version` |
+
+> **Pins changed 2026-09-19.** The previous Anchor 0.30.1 / Rust 1.79.0 / Solana 1.18.17 pins were impossible: the pinned Orca commit requires `anchor-lang` 0.32+ and a newer toolchain. See [ADR-0001 addendum](../adr/ADR-0001-orca-cpi-instruction-surface.md) and [`IMPL-01-FEASIBILITY.md`](../audits/IMPL-01-FEASIBILITY.md) §3.
 
 ```bash
 # cwd: $REPO
@@ -26,14 +28,14 @@ rustc --version && solana --version && anchor --version && node --version && yar
 Expected — patch versions may differ, **major/minor must not**:
 
 ```text
-rustc 1.79.0 (129f3b996 2024-06-10)
-solana-cli 1.18.17 (src:...; feat:..., client:Agave)
-anchor-cli 0.30.1
-v20.11.0
+rustc 1.98.1 (48a229cea 2026-09-01)
+solana-cli 3.0.0 (src:b6c96e84; feat:128318206, client:Agave)
+anchor-cli 1.2.0
+v24.11.1
 1.22.22
 ```
 
-> ⚠️ The repository currently ships **no** `rust-toolchain.toml`, `.tool-versions`, or `.nvmrc`. Versions above are the agreed pins and must be added as version files in the first implementation PR. Until then, verify by hand. `avm use 0.30.1` switches Anchor; `solana-install init 1.18.17` switches the Solana CLI.
+The repo now ships `rust-toolchain.toml` and `.nvmrc`. `avm use 1.2.0` switches Anchor.
 
 ## 2. Environment
 
@@ -61,24 +63,45 @@ solana balance -u devnet -k "$ANCHOR_WALLET"      # need ≥ 2 SOL; top up with:
 The Whirlpool program is **not** in the local validator by default. Every test in §4 fails without this step.
 
 ```bash
-# cwd: $REPO — run in a dedicated terminal and leave it running
-solana-test-validator --reset \
-  --url https://api.devnet.solana.com \
-  --clone-upgradeable-program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc \
-  --clone FcrweFY1G9HJAHG5inkGB6pKg1HZ6x9UC2WioAfWrGkR \
-  --clone "$PERMA_WHIRLPOOL" \
-  --clone "$PERMA_WHIRLPOOL_VAULT_A" \
-  --clone "$PERMA_WHIRLPOOL_VAULT_B"
+# cwd: $REPO — generate the fixtures first; they are keyed to your wallet.
+node scripts/make-fixtures.mjs
+
+# Then start the validator. Run in a dedicated terminal and leave it running,
+# or pass --detach to background it and wait for the Orca clone to land.
+./scripts/local-validator.sh
 ```
+
+`scripts/local-validator.sh` is the single source of truth for the flag list and is
+mirrored in `Anchor.toml` under `[test.validator]`. **Keep the two in sync** — they drifted
+once already: §3 was missing the active-rewards pool and the unallowlisted pool, and the
+result was not a loud failure but two tests that passed for the wrong reason.
+
+The `--account` entries are the **funded PERMA fixtures**. devUSDC cannot be minted
+locally, so they are hand-crafted SPL token accounts at the addresses the program derives.
+The user ATAs carry balances; the market vaults are emitted **empty** and filled by the
+real `deposit_collateral`. The devUSDC *mint* is never modified. Without them the liquidity
+suite fails fast in its `before` hook.
+
+> In **zsh**, do not build the `--clone` list in a shell variable — zsh does not word-split unquoted parameters, and the validator fails with `Invalid value for '--clone'`.
 
 | Account | What it is |
 |---|---|
 | `whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc` | Whirlpool program (same ID on devnet and mainnet) |
 | `FcrweFY1G9HJAHG5inkGB6pKg1HZ6x9UC2WioAfWrGkR` | `WhirlpoolsConfig`, devnet |
-| `$PERMA_WHIRLPOOL` | The allowlisted SOL/USDC Whirlpool — set this to the address recorded at `create_market` |
-| vaults A/B | `token_vault_a` / `token_vault_b` read off that Whirlpool account |
+| `2WUgXb…ym9G` | **The allowlisted SOL/devUSDC Whirlpool** (`tick_spacing = 8`) |
+| `3uyTv2…DGh4` / `63GvSv…DT5C` | its `token_vault_a` / `token_vault_b` |
+| `So1111…1112` / `BRjpCH…ok1k` | WSOL and devUSDC mints |
+| `86pYzh…H571` / `49ixSQ…cFPv` | TickArrays for the demo range (starts `-40832`, `-38720`) |
+| `ACkArM…KZGy` | TickArray `-39424`, the narrow same-array case |
+| `EgxU92…EiZ4` | a devnet pool with **active reward emissions** — proves the factory's allowlist check fires before its rewards check (`tests/factory*.ts`) |
+| `3KBZiL…HvPt` | a real devnet pool that is **not** allowlisted (`tests/adapter.ts`) |
 
-Also clone the TickArray accounts covering your test range, or the suite must create them via `initialize_tick_array`. For the `[-17152, -15104]` range at `tick_spacing = 64`, that is the arrays with start indices **`-22528`** and **`-16896`** — see [`01-clmm-adapter-orca.md`](../02-mvp-components/01-clmm-adapter-orca.md) §C.3–§C.4 for the derivation and exact PDA seeds.
+TickArrays must be cloned too, or every liquidity call fails with `TickArrayNotInitialized`. The three above cover the demo range on the allowlisted pool — see [`01-clmm-adapter-orca.md`](../02-mvp-components/01-clmm-adapter-orca.md) §C.3a for the derivation.
+
+The last two entries are not optional conveniences. A *missing* account does not make a
+rejection test fail — it makes it reject for a different reason and pass anyway. Without
+`3KBZiL…HvPt` the allowlist test failed at Whirlpool deserialization and never reached the
+allowlist check it is named for.
 
 Confirm the clone worked:
 
@@ -95,14 +118,24 @@ Expected: program details with a non-zero data length. `Error: Unable to find th
 
 ```bash
 # cwd: $REPO
-anchor build
+anchor build --arch v0
 ```
+
+> **Expect seven lines beginning `Error: Function … overflows the maximum allowed frame
+> space`.** They name `orca_whirlpools_client::generated::accounts::{fixed,dynamic}_tick_array`
+> deserializers — **not PERMA code**. The build completes and the `.so` is valid. PERMA
+> never calls them: it locates TickArrays by deriving the PDA (`adapter::derive_tick_array`)
+> and passes them straight to Orca, and never deserializes a TickArray itself. Treat them as
+> known upstream noise; a *new* name in that list is not.
+
+> **`--arch v0` is required.** Anchor 1.x defaults to `--arch v3`, which produces an ELF the local validator's loader rejects with `ELF error: Failed to parse ELF file: invalid file header`. Verify with
+> `python3 -c "import struct;print(struct.unpack_from('<I',open('target/deploy/perma.so','rb').read(64),48)[0])"` - it must print `0`.
 
 Expected: `Finished release [optimized] target(s)`, and `target/deploy/perma.so` exists. Then sync the program ID:
 
 ```bash
 # cwd: $REPO
-anchor keys sync && anchor build
+anchor keys sync && anchor build --arch v0     # keep --arch v0 on the rebuild too
 ```
 
 ### 4.2 Core functional suite
@@ -111,19 +144,36 @@ anchor keys sync && anchor build
 
 ```bash
 # cwd: $REPO
-anchor test --skip-local-validator
+export ANCHOR_PROVIDER_URL="http://127.0.0.1:8899"
+export ANCHOR_WALLET="$HOME/.config/solana/id.json"
+solana program deploy target/deploy/perma.so \
+  --program-id target/deploy/perma-keypair.json -u localhost
+
+npx ts-mocha -p ./tsconfig.json -t 1000000 \
+  tests/adapter.ts tests/adapter-liquidity.ts tests/collateral.ts \
+  tests/factory.ts tests/position-short.ts tests/position-long.ts \
+  tests/settle-premium.ts tests/risk-solvency.ts
 ```
 
-Expected: every suite green, `0 failing`. This covers gates **S1–S4** below.
+Expected: **76 passing, 0 failing**. This covers gates **S1–S5** below.
 
-To run one gate at a time:
+> `tests/factory-rewards.ts` is **excluded on purpose** and needs its own `--reset`
+> ledger: it allowlists a different pool, so running it alongside makes every other
+> suite fail `PoolNotAllowlisted`. Plain `anchor test` picks up `tests/**/*.ts` and
+> therefore includes it — run the explicit list above instead.
+
+Run the list **twice against the same ledger**, then once in reverse order. Suites must be
+order-independent; a pass that only works from a fresh ledger is hiding state coupling.
+
+To run one gate at a time (no test title contains "S1"…"S4" — run the suite that carries it):
 
 ```bash
 # cwd: $REPO
-anchor test --skip-local-validator -- --grep "S1"     # short-to-Orca
-anchor test --skip-local-validator -- --grep "S2"     # long inventory gate
-anchor test --skip-local-validator -- --grep "S3"     # settlement
-anchor test --skip-local-validator -- --grep "S4"     # solvency
+T="npx ts-mocha -p ./tsconfig.json -t 1000000"
+$T tests/position-short.ts                     # S1 short-to-Orca
+$T tests/position-long.ts                      # S2 long inventory gate
+$T tests/settle-premium.ts tests/position-long.ts   # S3 premium settlement (cash)
+$T tests/collateral.ts tests/risk-solvency.ts  # S4 withdraw gate: free balance + open-long liability + margin
 ```
 
 ### 4.3 Adapter CPI suite
@@ -139,23 +189,38 @@ Expected: includes passing cases for missing TickArray, unaligned tick, wrong wh
 
 ### 4.4 Math vector validation
 
-Vectors are defined in [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md); the machine-readable copy lives at `tests/vectors/`.
+Vectors are defined in [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) and encoded as Rust unit tests in `programs/perma/src/premium.rs`. *(There is no `tests/vectors/` directory and no `yarn test:math-vectors`; an earlier draft described a JSON runner that was never built.)*
 
 ```bash
 # cwd: $REPO
-yarn test:math-vectors
+yarn test:unit          # = cargo test -p perma --lib
 ```
 
-| Input file | Expected-output file | Covers |
+Expected: **60 passing** (as of component 09). The vector tests by name:
+
+| Test | Covers | Needs the pool? |
 |---|---|---|
-| `tests/vectors/premium.json` | `tests/vectors/expected/premium.json` | `FIXTURES-AND-VECTORS.md` §1 |
-| `tests/vectors/pnl-short.json` | `tests/vectors/expected/pnl-short.json` | §2 |
-| `tests/vectors/solvency.json` | `tests/vectors/expected/solvency.json` | §3 |
-| `tests/vectors/orca-liquidity.json` | `tests/vectors/expected/orca-liquidity.json` | §4 |
+| `v1_single_long_accrual` | §1 V1 — single-long accrual | No |
+| `v6_settle_frequency_neutrality` | §1 V6 — settle-frequency neutrality | No |
+| `v2_unequal_shorts_split_pro_rata_with_dust`, `v3_equal_shorts_split_evenly_with_dust` | §2 V2, V3 — pro-rata split, residue | No |
+| `v4_poking_before_the_weight_change_is_correct`, `v4_poking_after_the_weight_change_is_wrong` | §2 V4 — ordering guard, asserted in **both** directions | No |
+| `v5_short_exits_early_and_is_made_whole_when_cash_arrives` | §2 V5 — receivable carry | No (and on chain in `tests/settle-premium.ts`) |
+| §3 P&L | **not implemented** — Part B (no price to value against) | — |
+| `risk.rs` tests (10) | §4 solvency: margin round-up / overflow, projection, no-mutation, both gates | No |
+| `tests/adapter-liquidity.ts` | §6 Orca liquidity | **Yes** |
 
-Expected: `N passing (Nms)` with zero diffs. On mismatch the runner prints `expected / actual` per vector — treat any diff as a **FAIL**, never update the expected file to match the code without an accompanying spec change.
+Then reconcile the two money identities from outside the program:
 
-> ⚠️ `FIXTURES-AND-VECTORS.md` §4 still carries placeholder values (`SOL = X, USDC = Y`). Those must be replaced with computed Whirlpool figures before this sub-gate can pass.
+```bash
+node scripts/reconcile.mjs      # range_vault.amount == premium_pool + dust for every range;
+                                # vault + Σ in_orca == Σ(free + locked) — exactly 0 on the product path;
+                                # UserCollateral.open_longs == count(open LONG positions) per user
+```
+
+Two vectors are regression guards rather than ordinary cases; a failure in either is a correctness bug, not a tuning issue:
+
+- **V6** asserts 100 single-slot settles total exactly the same as one 100-slot settle. If this fails, the rounding policy has drifted to ceil-or-floor-per-settle and the permissionless crank becomes a griefing vector ([`07-premium-engine.md`](../02-mvp-components/07-premium-engine.md) §C).
+- **V4** asserts a late-joining short earns nothing for the period before it existed. If this fails, `poke_range` is running after a liquidity-weight change ([`08-burn-settle.md`](../02-mvp-components/08-burn-settle.md) invariant 5).
 
 ## 5. Devnet deployment
 
@@ -171,19 +236,17 @@ Then initialize per [`RUNBOOK-DEVNET.md`](../07-ops-presentation/RUNBOOK-DEVNET.
 
 ```bash
 # cwd: $REPO
-yarn scripts:init-market                              # global config + allowlisted SOL/USDC market
-yarn scripts:seed-shorts --amount 10000 --range 180-220   # so the long path is demoable
-yarn perma-cli get-market-status                      # expect non-zero short inventory
+# TODO: none of these scripts exist yet. The working equivalents are the before() hooks in
+#       tests/factory.ts (init + create_market) and tests/position-short.ts (mintShort); the
+#       demo range is 18-22 USDC/SOL (ticks -40176 / -38168), NOT 180-220.
+# yarn scripts:init-market
+# yarn scripts:seed-shorts --amount 10000 --range 18-22
+node scripts/reconcile.mjs                             # inventory + escrow + conservation per range
 ```
 
 ## 6. End-to-end and UI
 
-```bash
-# cwd: $REPO/app
-yarn install && yarn dev          # http://localhost:3000
-```
-
-Walk [`E2E-DEMO-SCRIPT.md`](E2E-DEMO-SCRIPT.md) start to finish against devnet, collecting a transaction signature at each step.
+> **Build gap:** there is no `app/` in the repo. E1/E2 cannot pass until a UI exists; walk [`E2E-DEMO-SCRIPT.md`](E2E-DEMO-SCRIPT.md) against the test suites / explorer instead, collecting a transaction signature at each step.
 
 ---
 
@@ -195,10 +258,11 @@ Sign off only with a real artifact per row — a transaction signature, or the t
 
 | ID | Gate | Verified by | Evidence |
 |---|---|---|---|
-| S1 | `mint_options(SHORT)` actually adds liquidity to the target Whirlpool | §4.2 `--grep "S1"` | Explorer shows the `increaseLiquidityV2` CPI; Whirlpool `liquidity` increased |
-| S2 | `mint_options(LONG)` rejects with no short inventory, succeeds with it | §4.2 `--grep "S2"` | Both assertions pass; rejection returns `NoShortInventory` |
-| S3 | `burn_options` settles P&L + premium into collateral | §4.2 `--grep "S3"` | Collateral delta matches the §4.4 vectors |
-| S4 | `withdraw_collateral` blocked when it would leave a position insolvent | §4.2 `--grep "S4"` | Rejection returns `InsolventWithdrawal` |
+| S1 | `mint_position(SHORT)` actually adds liquidity to the target Whirlpool | `tests/position-short.ts`, `tests/adapter-liquidity.ts` | Explorer shows the `increaseLiquidityV2` CPI; Whirlpool `liquidity` increased |
+| S2 | `mint_position(LONG)` rejects with no short inventory, succeeds with it | `tests/position-long.ts` | Both assertions pass; rejection returns `NoShortInventory` |
+| S3 | `burn_position` settles **premium** into collateral, in cash | `tests/settle-premium.ts`, `tests/position-long.ts` | `vault_b` debited and `range_vault` credited by the same amount; `range_vault.amount == premium_pool + dust` after every path. **Long P&L is 0 by decision** ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)); short burn credits Orca's returned amounts, so `returned − locked` is realized once in `close_short`. See `IMPL-08-BURN-SETTLE-REPORT.md` |
+| S5 | Premium splits pro-rata across multiple shorts, zero-sum with residue accounted | `cargo test -p perma --lib`, `tests/settle-premium.ts` | V2 `74 999`/`24 999` residue `2`; V3 `33 333` each, residue `1`; V5 end-to-end on chain. `node scripts/reconcile.mjs` reconciles both identities over RPC. **`dust` itself is never written** — the residue stays inside `premium_pool`; see the same report |
+| S4 | `withdraw_collateral` blocked when it would leave an obligation uncovered | `tests/collateral.ts`, `tests/risk-solvency.ts` | More than free balance → `InsufficientFunds` (locked is unreachable by construction). Free USDC below open-long accrued premium + margin → `InsolventWithdrawal` — asserted with a cranked index (R3) and an **uncranked** one (R7). Long mint below margin → `InsolventMint` (R1). |
 
 ### Adapter
 
@@ -216,7 +280,7 @@ Sign off only with a real artifact per row — a transaction signature, or the t
 | E2 | UI shows live P&L and accrued premium matching on-chain state | §6 |
 | Q1 | The banner `Prototype. Not audited. Single pool. Not production mainnet risk capital.` is visible on **every** page, verbatim and non-dismissible | [`COPY-DECK.md`](../04-ui-ux/COPY-DECK.md) §1 |
 | Q2 | All screens pass the anti-slop review, including the banned-phrase list | [`UI-QA-CHECKLIST.md`](../04-ui-ux/UI-QA-CHECKLIST.md), `COPY-DECK.md` §5 |
-| Q3 | Math vectors match expected outputs with zero diffs | §4.4 |
+| Q3 | `yarn test:unit` green (60), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
 
 **The gate passes only when every row above passes.** A partial pass is a FAIL.
 
@@ -227,10 +291,10 @@ Sign off only with a real artifact per row — a transaction signature, or the t
 | Symptom | Where to look | Usual cause |
 |---|---|---|
 | Any Orca CPI fails | `solana logs` in the validator terminal; per-test logs under `$REPO/.anchor/program-logs/` | Wrong or missing TickArray — recheck `01-clmm-adapter-orca.md` §C.4 seeds and §C.3 `div_euclid` |
-| `AccountNotFound` for the Whirlpool | Validator startup output | §3 clone step skipped or `$PERMA_WHIRLPOOL` unset |
+| `AccountNotFound` for the Whirlpool | Validator startup output | §3 clone step skipped (use `scripts/local-validator.sh`) |
 | `ClosePositionNotEmpty` `0x1775` | Program logs | `collect_fees_v2` skipped before `close_position` |
 | `LiquidityZero` `0x177c` | Program logs | `update_fees_and_rewards` called after liquidity hit zero — remove it |
-| `DeclaredProgramIdMismatch` | `anchor build` output | Run `anchor keys sync && anchor build` |
+| `DeclaredProgramIdMismatch` | `anchor build` output | Run `anchor keys sync && anchor build --arch v0` |
 | Tests hang then time out | Validator terminal | Validator died; `--reset` and restart §3 |
 | Devnet tx timeouts | RPC response times | Public devnet RPC is rate-limited — switch to Helius/Triton per [`TECH-STACK.md`](../05-engineering/TECH-STACK.md) |
 | Vector diff | Runner `expected / actual` output | Genuine math regression — fix the code, not the expected file |

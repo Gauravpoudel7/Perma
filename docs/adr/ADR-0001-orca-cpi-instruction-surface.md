@@ -67,3 +67,42 @@ Additionally, two Orca behaviors discovered during verification are recorded her
 ---
 
 **🚩 STATUS:** Prototype. Not audited. Single pool. Not production mainnet risk capital.
+
+---
+
+## Addendum — 2026-09-19: CPI crate and toolchain
+
+**Status**: Accepted · **Supersedes**: the "whirlpool program crate with `features = [\"cpi\"]`" decision above.
+
+### Context
+
+Implementing component 01 showed the original CPI plan does not build. The pinned Orca commit exact-pins `anchor-lang = "=0.32.1"`, `solana-program = "=2.2.1"`, and a `1.86.0` toolchain — mutually incompatible with the Anchor 0.30.1 / Rust 1.79.0 / Solana 1.18.17 the docs pinned. Two `anchor-lang` majors in one graph make `Context`, `CpiContext`, and `AccountInfo` distinct types.
+
+### Decision
+
+CPI through **`orca_whirlpools_client` v8.0.0** (crates.io), `default-features = false`, paired with **`anchor-lang 1.2.0`**.
+
+- The client is **code-generated from the pinned program**, so discriminators, account order, and PDA seeds are still Orca's. `get_tick_array_address` even builds the `to_string()` seeds the spec warns about — Orca's own library confirming our rule.
+- Its `…Cpi` structs accept Anchor's `AccountInfo` and expose `invoke_signed`, so PDA-authorized CPI works directly.
+- The optional `anchor` feature is **deliberately not enabled**: its open `anchor-lang = ">=0.31"` range resolves to a *second* `anchor-lang` alongside ours.
+
+Only two coherent pairings exist — `anchor-lang 0.32.x` + client `6.0.0` (both solana `^2`), or `anchor-lang 1.2.0` + client `8.0.0` (both solana `^3`). The latter was chosen because client v8 matches the pinned program; client 6.0.0 predates it and its layouts are unverified against `408c945`.
+
+### Resolved pins
+
+| Tool | Pin |
+|---|---|
+| Rust | `1.98.1` stable (solana `v4` crates need ≥ 1.89) |
+| Anchor CLI / `anchor-lang` | `1.2.0` |
+| Agave / Solana CLI | `4.1.2` |
+| SBPF target | **`v0`** (`anchor build --arch v0`) |
+
+### Consequences
+
+- **Positive**: real CPI with compile-checked account structs; verified by 12 passing integration tests against the cloned devnet pool.
+- **Negative**: `anchor-lang 1.x` is a major jump from the 0.30.1 the docs assumed. Zero migration cost (no code existed), but most online Anchor material targets 0.2x/0.3x.
+- **Negative**: Anchor's default `--arch v3` produces an ELF the local validator's loader rejects (`invalid file header`). `--arch v0` is required and is now in `RELEASE-GATE.md`.
+- **Risk**: two `solana-pubkey` versions (3.0.0, 4.3.0) remain in the graph. They do not cross the CPI type boundary, but `cargo tree -d` belongs in CI.
+- **Risk**: the client's `FixedTickArray::from(DynamicTickArray)` exceeds the 4 KB BPF stack frame (~10.7 KB). PERMA never calls it — we validate TickArrays by PDA and ownership, never deserialize them — but linking it emits a build warning.
+
+**Related**: [`IMPL-01-FEASIBILITY.md`](../audits/IMPL-01-FEASIBILITY.md) · [`IMPL-01-CLMM-ADAPTER-REPORT.md`](../audits/IMPL-01-CLMM-ADAPTER-REPORT.md)

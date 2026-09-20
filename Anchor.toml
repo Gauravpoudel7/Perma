@@ -1,0 +1,91 @@
+[toolchain]
+anchor_version = "1.2.0"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+perma = "4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt"
+
+[programs.devnet]
+perma = "4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+# Orca Whirlpool program + the allowlisted devnet pool, cloned for integration tests.
+# See docs/06-testing/RELEASE-GATE.md section 3.
+[test.validator]
+url = "https://api.devnet.solana.com"
+
+[[test.validator.clone]]
+address = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+
+[[test.validator.clone]]
+address = "FcrweFY1G9HJAHG5inkGB6pKg1HZ6x9UC2WioAfWrGkR"
+
+[[test.validator.clone]]
+address = "2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G"
+
+[[test.validator.clone]]
+address = "3uyTv2Pi3pb6Gc2emKiYU8gW845M1HeMMyFr2MTrDGh4"
+
+[[test.validator.clone]]
+address = "63GvSvGYTsfesX1kmesdtfxHbBQBsFpZT1wVNhNADT5C"
+
+[[test.validator.clone]]
+address = "So11111111111111111111111111111111111111112"
+
+[[test.validator.clone]]
+address = "BRjpCHtyQLNCo8gqRUr8jtdAj5AjPYQaoqbvcZiHok1k"
+
+# TickArrays covering the demo range (start -40832 / -38720) and the
+# narrow same-array case (-39424). Required by the adapter validation tests.
+
+# Devnet pool WITH active reward emissions - used to prove the factory's
+# allowlist check fires before the rewards check (tests/factory*.ts).
+[[test.validator.clone]]
+address = "EgxU92G34jw6QDG9RuTX9StFg1PmHuDqkRKAE5kVEiZ4"
+
+# A real devnet Whirlpool that is NOT allowlisted. Without it the account does
+# not exist locally and `validate_short_range` fails at deserialization, so the
+# allowlist assertion in tests/adapter.ts never actually runs.
+[[test.validator.clone]]
+address = "3KBZiL2g8C7tiJ32hTv5v3KM7aK9htpqTw4cTXz1HvPt"
+
+[[test.validator.clone]]
+address = "86pYzhWoHDwaKbYMbM4gNC7EQTQgbv8WTG5rRjVNH571"
+
+[[test.validator.clone]]
+address = "49ixSQnGC2AEzgwQAeHkDnLYJYKtB2c9rSgpb7PncFPv"
+
+[[test.validator.clone]]
+address = "ACkArMv6JBtNTM64qLYnNirkMyWgYHUJ9x6CMbLPKZGy"
+
+# Component 03: the USER's ATAs are funded; the market vaults are emitted EMPTY
+# and filled by the real deposit_collateral instruction. devUSDC cannot be
+# minted locally, so these are hand-crafted SPL accounts (the MINT is untouched).
+# Regenerate per-machine with: node scripts/make-fixtures.mjs
+[[test.validator.account]]
+address = "J93MdzNbVkKHBh3KwWwS7Y7CjqtqfFHwd1zHgFgw3UZQ"
+filename = "tests/fixtures/user-a.json"
+
+[[test.validator.account]]
+address = "A728HNbbk6AjiqTsqNt5FbD7cz7xNpeXrx35qetgLcmX"
+filename = "tests/fixtures/user-b.json"
+
+[[test.validator.account]]
+address = "3umaZKmQYDM2xbduPAa6LQWwj7Ngh4X6ZTRoNCfzNDdY"
+filename = "tests/fixtures/vault-a.json"
+
+[[test.validator.account]]
+address = "HNR1XRJoG6gLPDfk5Hwz8p5S7PTihFZkvHrsdxGWaYWR"
+filename = "tests/fixtures/vault-b.json"

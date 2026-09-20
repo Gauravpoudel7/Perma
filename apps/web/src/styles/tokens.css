@@ -1,0 +1,149 @@
+/*
+ * Design tokens, transcribed 1:1 from docs/04-ui-ux/BRAND-SYSTEM.md.
+ * This file is the single source of truth for PERMA's "Institutional
+ * Precision" look. If a value here disagrees with that doc, the doc wins —
+ * fix this file, don't add a second source of truth in a component.
+ *
+ * Forbidden, per BRAND-SYSTEM.md's Anti-Slop Guidelines: glassmorphism,
+ * generic purple/blue gradients, soft/fuzzy drop shadows (use the 1px
+ * border tokens below instead), and anything above an 8px radius.
+ */
+
+:root {
+  /* Color */
+  --color-bg: #0a0a0a;
+  --color-surface: #141414;
+  --color-border: #262626;
+  --color-text-primary: #ffffff;
+  --color-text-muted: #a1a1aa;
+  --color-accent: #ffffff;
+  --color-success: #10b981;
+  --color-danger: #ef4444;
+  --color-solana-accent: #14f195; /* blockchain-specific markers ONLY, never a primary color */
+
+  /* Fonts — sans/mono for all product UI; serif is marketing-only, never used in apps/web */
+  --font-serif: "Fraunces", "Playfair Display", ui-serif, Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica,
+    Arial, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+    Consolas, monospace;
+
+  /* Spacing (4px base) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Radius — nothing in PERMA uses a radius above 8px */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-full: 9999px;
+
+  /* Border & focus */
+  --border-width: 1px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* Safe-area padding for fixed banner/topbar on notched devices */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Type scale (token: weight / size / line-height / letter-spacing) */
+.text-h2 {
+  font-weight: 600;
+  font-size: 2rem;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+.text-h3 {
+  font-weight: 600;
+  font-size: 1.5rem;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.text-h4 {
+  font-weight: 600;
+  font-size: 1.125rem;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+}
+.text-body-md {
+  font-weight: 400;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.text-body-sm {
+  font-weight: 400;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.text-caption {
+  font-weight: 400;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+}
+.text-overline {
+  font-weight: 700;
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.text-button {
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1;
+  letter-spacing: 0.005em;
+}
+.text-metric-lg {
+  font-weight: 600;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.text-mono-md {
+  font-weight: 400;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  font-family: var(--font-mono);
+}
+.text-mono-sm {
+  font-weight: 400;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-family: var(--font-mono);
+}
+
+/* Numeric rule: every live/tabular numeric value uses tabular figures. */
+.tabular-nums,
+.text-metric-lg,
+.text-mono-md,
+.text-mono-sm {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Motion: 100ms linear only. No bounce, no spring easing, anywhere. */
+.transition-brand {
+  transition-property: color, background-color, border-color, opacity, transform;
+  transition-duration: 100ms;
+  transition-timing-function: linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transition-brand {
+    transition: none;
+  }
+}
+
+/* Focus ring: high-contrast white, 2px, 2px offset. Never removed, only restyled per-surface. */
+.focus-ring:focus-visible {
+  outline: var(--focus-ring-width) solid #ffffff;
+  outline-offset: var(--focus-ring-offset);
+}

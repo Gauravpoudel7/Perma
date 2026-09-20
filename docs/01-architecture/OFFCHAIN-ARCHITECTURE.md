@@ -19,7 +19,7 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant UI as React Frontend
     
-    Solana ->> Indexer: Emit Event (PositionMinted)
+    Solana ->> Indexer: Emit Event (ShortMinted / LongMinted)
     Indexer ->> Indexer: Parse Log & Fetch Account Data
     Indexer ->> DB: Update Position State
     UI ->> Indexer: GET /positions/{user}

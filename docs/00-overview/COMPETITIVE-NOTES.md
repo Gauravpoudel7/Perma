@@ -27,7 +27,7 @@ PERMA is not just an options layer; it is a **Liquidity Engine** for Solana.
 | Risk | Market Reality | PERMA Mitigation |
 | :--- | :--- | :--- |
 | **Liquidity Crunch** | If no one shorts, no one can go long. | Bootstrap shorts via demo operators and MM partners. |
-| **Oracle Manipulation** | Flash loans can spike prices to trigger liquidations. | Use Orca's pool observations and TWAP gates for all risk-critical operations. |
+| **Oracle Manipulation** | Flash loans can spike prices to trigger liquidations. | Fair MVP uses Orca spot `tick_current_index` for range gating only; no price-dependent settlement or liquidation exists (`PRD.md` §A2 stretch; ADR-0003). Orca Whirlpool exposes **no** observations/TWAP — a manipulation-resistant price for Part B risk ops needs an external source. |
 | **Complex UX** | Tick ranges are confusing for retail. | "Institutional" positioning. Focus on professional tools, precise ranges, and clear P&L visualization. |
 
 ---

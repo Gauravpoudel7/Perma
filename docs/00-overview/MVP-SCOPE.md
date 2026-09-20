@@ -18,12 +18,12 @@ To prove, on-chain, that Solana concentrated liquidity can power a complete perp
 - **Shorts**: Must actually call Orca CPI to add liquidity to the Whirlpool.
 - **Longs**: Can only be opened if corresponding short liquidity exists in that range.
 - **Lifecycle**: 
-    - `mint_options` $\rightarrow$ `burn_options` (Close/Settle).
+    - `mint_position` $\rightarrow$ `burn_position` (Close/Settle).
     - Streaming premium accumulation tracked on-chain.
 
 ### 3. Financials & Risk
 - **Collateral**: SOL and/or USDC deposits.
-- **Solvency**: Margin-based checks on every `mint` and `withdraw` operation.
+- **Solvency**: on every `withdraw_collateral` and long `mint_position`, free USDC must cover the user's open-long premium liability plus a horizon margin — no price input ([component 09](../02-mvp-components/09-risk-solvency.md), [ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)).
 - **Settlement**: P&L + Premium settled into collateral balances upon burning the position.
 
 ### 4. User Experience
