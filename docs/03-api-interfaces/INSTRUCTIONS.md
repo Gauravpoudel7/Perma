@@ -1,8 +1,8 @@
 # INSTRUCTIONS: Program Interface
 
-The **14** public instructions of the PERMA program, as shipped through component 08. Names, parameters and account lists are the live ones (`programs/perma/src/lib.rs`); the working client patterns are in `tests/*.ts`. Sizes were measured on a local validator with `scripts/measure-position.mjs` (2026-09-20).
+The **17** public instructions of the PERMA program, as shipped through component 10. Names, parameters and account lists are the live ones (`programs/perma/src/lib.rs`); the working client patterns are in `tests/*.ts`. Sizes were measured on a local validator with `scripts/measure-position.mjs` (2026-09-20).
 
-Every instruction except the two admin ones checks `!Market.is_paused` — and since no instruction sets that flag in Fair MVP (component 10), it is `false` from `create_market` onward.
+`Market.is_paused` (written by `pause_market` / `unpause_market`, component 10) gates only the **risk-increasing** instructions: `mint_position`, `deposit_collateral`, `lock_collateral`, `adapter_open_position`, `adapter_add_liquidity` reject `MarketPaused`. Exit paths — `burn_position`, `settle_premium`, `withdraw_collateral`, `unlock_collateral`, `adapter_close_position`, `adapter_remove_liquidity` — and the read-only `validate_short_range` run while paused, subject to their own gates. Full matrix: [`10-pause-admin.md`](../02-mvp-components/10-pause-admin.md).
 
 ## 1. Global Administration
 
@@ -16,11 +16,21 @@ Every instruction except the two admin ones checks `!Market.is_paused` — and s
 - **Purpose**: Register the allowlisted Orca market.
 - **Caller**: **admin only** (`global_config.admin`).
 - **Accounts**: `admin` (Signer, Write), `global_config`, `market` (Write, init, PDA `["market", whirlpool]`), `market_authority` (PDA `["market_authority", market]`), `whirlpool`, `vault_a` / `vault_b` (the PERMA ATAs owned by `market_authority`), `whirlpool_program`, `system_program`.
-- **Params**: none — the pool arrives as an account and the `Market` PDA derives from it. Premium parameters are set from `premium_defaults` and risk parameters from `risk_defaults` (`long_margin_horizon_slots = 1_000`, `long_margin_buffer_usdc = 1_000_000`). **No update path exists for any of them** (component 10).
+- **Params**: none — the pool arrives as an account and the `Market` PDA derives from it. Premium parameters are set from `premium_defaults` and risk parameters from `risk_defaults` (`long_margin_horizon_slots = 1_000`, `long_margin_buffer_usdc = 1_000_000`). Premium parameters have **no update path**; the two risk parameters are updated by `set_market_risk_params` (below).
 - **Guards**: `Unauthorized` → `PoolNotAllowlisted` → Whirlpool program ID → active rewards → live geometry → PERMA vault mint/owner.
 
-### `pause_market` / `unpause_market` — **NOT IMPLEMENTED**
-Component 10. `Market.is_paused` exists and every user instruction checks it, but nothing writes it.
+### `pause_market()` / `unpause_market()`
+- **Purpose**: trip / clear the circuit breaker (component 10). See the matrix note at the top of this file for what a pause blocks.
+- **Caller**: **admin only** (`global_config.admin`), else `Unauthorized`.
+- **Accounts**: `admin` (Signer), `global_config` (PDA `["global_config"]`), `market` (Write, PDA `["market", market.whirlpool]`). No payer: the only write is the existing `is_paused` byte.
+- **Idempotent**: pausing an already-paused market (or unpausing an unpaused one) returns `Ok(())` and emits nothing. A real transition emits `MarketPauseSet { market, admin }` / `MarketPauseCleared { market, admin }`.
+- **Size**: 244 bytes (measured, `tests/pause-admin.ts`).
+
+### `set_market_risk_params(long_margin_horizon_slots: u64, long_margin_buffer_usdc: u64)`
+- **Purpose**: set the ADR-0003 long-margin parameters (component 10). Writes exactly those two `Market` fields in place — never `premium_rate` / `premium_multiplier`.
+- **Caller**: admin only, else `Unauthorized`. **Accounts**: as `pause_market`.
+- **Guard**: `risk::validate_risk_params` rejects `InvalidRiskParams` when `horizon == 0`, `buffer == 0`, or the margin at `risk::MARGIN_LIQUIDITY_BOUND` (2^52) — or its `MAX_OPEN_LONGS`-fold sum — would overflow `u64` under the current rate/multiplier (ADR-0003's "overflow at withdraw locks funds" requirement). Nothing is written on rejection.
+- **Emits**: `MarketRiskParamsSet { market, admin, long_margin_horizon_slots, long_margin_buffer_usdc }`. **Size**: 260 bytes.
 
 ## 2. Collateral Management
 

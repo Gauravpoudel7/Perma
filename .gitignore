@@ -4,3 +4,15 @@ node_modules
 test-ledger
 .DS_Store
 dist
+# Local-only / Claude session artifacts (not for GitHub)
+docs/prompts/
+docs/audits/
+docs/PERMA-LEARNING-BOOK.md
+docs/09-post-mvp/
+docs/04-ui-ux/screenshots/
+docs/07-ops-presentation/DEMO-DAY-SCRIPT.md
+docs/07-ops-presentation/DEMO-DAY-SLIDES.md
+docs/07-ops-presentation/METRICS.md
+docs/07-ops-presentation/PERMA-Demo-Day.pptx
+docs/07-ops-presentation/PRESENTATION-BRIEF.md
+**/tsconfig.tsbuildinfo

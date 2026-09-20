@@ -152,10 +152,10 @@ solana program deploy target/deploy/perma.so \
 npx ts-mocha -p ./tsconfig.json -t 1000000 \
   tests/adapter.ts tests/adapter-liquidity.ts tests/collateral.ts \
   tests/factory.ts tests/position-short.ts tests/position-long.ts \
-  tests/settle-premium.ts tests/risk-solvency.ts
+  tests/settle-premium.ts tests/risk-solvency.ts tests/pause-admin.ts
 ```
 
-Expected: **76 passing, 0 failing**. This covers gates **S1–S5** below.
+Expected: **93 passing, 0 failing** (76 through component 09 + 17 in `tests/pause-admin.ts`). This covers gates **S1–S5** below. `pause-admin.ts` goes **last** in the forward list: it self-heals (unpause + restore risk defaults) in its own `before()`/`after()`, so the reversed pass — where it runs first — also stays clean.
 
 > `tests/factory-rewards.ts` is **excluded on purpose** and needs its own `--reset`
 > ledger: it allowlists a different pool, so running it alongside makes every other
@@ -280,7 +280,7 @@ Sign off only with a real artifact per row — a transaction signature, or the t
 | E2 | UI shows live P&L and accrued premium matching on-chain state | §6 |
 | Q1 | The banner `Prototype. Not audited. Single pool. Not production mainnet risk capital.` is visible on **every** page, verbatim and non-dismissible | [`COPY-DECK.md`](../04-ui-ux/COPY-DECK.md) §1 |
 | Q2 | All screens pass the anti-slop review, including the banned-phrase list | [`UI-QA-CHECKLIST.md`](../04-ui-ux/UI-QA-CHECKLIST.md), `COPY-DECK.md` §5 |
-| Q3 | `yarn test:unit` green (60), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
+| Q3 | `yarn test:unit` green (66), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
 
 **The gate passes only when every row above passes.** A partial pass is a FAIL.
 

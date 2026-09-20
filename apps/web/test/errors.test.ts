@@ -13,7 +13,7 @@ const ALL_VARIANTS = [
   "TickNotAlignedToSpacing", "TickOutOfBounds", "PositionAuthorityMismatch",
   "UnexpectedRemainingAccounts", "SlippageExceeded", "ClosePositionNotEmpty",
   "InvalidRange", "InvalidAsset", "MathOverflow", "InvalidWhirlpoolAccount",
-  "InsolventMint", "MissingOpenLong", "TooManyOpenLongs",
+  "InsolventMint", "MissingOpenLong", "TooManyOpenLongs", "InvalidRiskParams",
 ];
 
 describe("PERMA_ERROR_COPY", () => {
@@ -24,8 +24,8 @@ describe("PERMA_ERROR_COPY", () => {
     }
   });
 
-  it("has exactly 34 entries — no stray or duplicate keys", () => {
-    expect(Object.keys(PERMA_ERROR_COPY).length).toBe(34);
+  it("has exactly 35 entries — no stray or duplicate keys", () => {
+    expect(Object.keys(PERMA_ERROR_COPY).length).toBe(35);
     expect(Object.keys(PERMA_ERROR_COPY).sort()).toEqual([...ALL_VARIANTS].sort());
   });
 });

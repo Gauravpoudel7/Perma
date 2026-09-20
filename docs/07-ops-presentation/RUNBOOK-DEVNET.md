@@ -24,8 +24,18 @@ To ensure longs can be opened, the market needs short liquidity in the demo rang
 ### Checking Market Status
 **TODO:** no `perma-cli`. Today: `node scripts/reconcile.mjs` prints every range's inventory, escrow balance and both conservation identities; `solana account <pda> -u <cluster>` for raw state.
 
-### Emergency Pause — **not available in Fair MVP**
-**There is no on-chain pause instruction.** `Market.is_paused` exists and every user instruction checks it, but nothing writes it (component 10 unbuilt). If an anomaly is detected the only mitigations are off-chain: stop the demo, do not publish the program ID, and — on a local validator — reset the ledger. Do **not** plan an incident response around a pause that does not exist.
+### Emergency Pause (component 10)
+From `apps/web`, signing with the `GlobalConfig` admin (`~/.config/solana/id.json`), with `.env.local` exported into the shell (`set -a; source .env.local; set +a`):
+
+```bash
+yarn pause-market      # Market.is_paused = true  (idempotent; prints before/after)
+yarn unpause-market    # Market.is_paused = false
+yarn set-risk-params <long_margin_horizon_slots> <long_margin_buffer_usdc>
+```
+
+**What a pause does**: blocks `mint_position`, `deposit_collateral`, `lock_collateral`, and the adapter open/add harness (`MarketPaused`). **What it never blocks** (Exit Guaranteed): `burn_position`, `settle_premium`, `withdraw_collateral` (still solvency-gated), `unlock_collateral`, adapter close/remove. Users can always leave. The UI badge reads **Paused**; Deposit and the Trade CTA are disabled; Withdraw / Close / Settle stay live. Full matrix: [`10-pause-admin.md`](../02-mvp-components/10-pause-admin.md).
+
+There is **no global pause** (`pause_global` deferred — one market in Fair MVP, so this is it) and **no multisig** on the admin key (post-MVP). `set-risk-params` refuses values that would overflow the margin bound (`InvalidRiskParams`) and never touches the premium rate or multiplier.
 
 ## Common Issues
 - **RPC Timeouts**: Switch to a high-performance RPC (Helius/Triton) if `mint_position` times out. On a local validator, a run that suddenly takes minutes and fails `TransactionExpiredTimeoutError` means the validator has degraded — restart it (`IMPL-08` residual #11).

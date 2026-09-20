@@ -2,7 +2,7 @@
   "name": "@perma/web",
   "version": "0.1.0",
   "private": true,
-  "description": "PERMA Fair MVP web UI \u2014 Trade / Portfolio / Vault. Prototype. Not audited. Single pool. Not production mainnet risk capital.",
+  "description": "PERMA Fair MVP web UI — Trade / Portfolio / Vault. Prototype. Not audited. Single pool. Not production mainnet risk capital.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,10 +10,15 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:update-screenshots": "playwright test --update-snapshots",
     "check-copy": "node scripts/check-banned-phrases.mjs",
     "verify-live": "tsx scripts/verify-live.ts",
     "verify-mint-long": "tsx scripts/verify-mint-long.ts",
-    "verify-withdraw-and-burn": "tsx scripts/verify-withdraw-and-burn.ts"
+    "verify-withdraw-and-burn": "tsx scripts/verify-withdraw-and-burn.ts",
+    "pause-market": "tsx scripts/pause-market.ts pause",
+    "unpause-market": "tsx scripts/pause-market.ts unpause",
+    "set-risk-params": "tsx scripts/pause-market.ts set-risk-params"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
@@ -28,6 +33,7 @@
     "zustand": "^4.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/bn.js": "^5.1.6",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",

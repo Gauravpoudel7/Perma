@@ -62,12 +62,35 @@ yarn test          # vitest — pure-function unit tests (solvency math, PDA
 yarn typecheck      # tsc --noEmit
 yarn check-copy      # greps src/ against docs/04-ui-ux/COPY-DECK.md §5's
                     # banned-phrase list
+yarn test:e2e       # Playwright — see below
 ```
 
-There is no browser/e2e test suite in this MVP. Manual verification against
-the local validator is the release gate instead — three scripts exercise the
-app's REAL `src/lib/*` modules (PDA derivation, account decoding, instruction
-building, error mapping) against genuine on-chain state, not a mock:
+### Browser/e2e tests (Playwright)
+
+```bash
+yarn test:e2e                     # headless Chromium desktop + mobile + WebKit desktop
+yarn test:e2e:update-screenshots  # re-capture docs/04-ui-ux/screenshots/*.png
+```
+
+`playwright.config.ts` starts `next dev` itself (port 3001 by default — 3000
+is often already in use on a dev machine; override with `PORT=<n>`) and
+reuses an already-running server if one answers on that port. Specs live in
+`apps/web/e2e/` only (never in `apps/web/test/`, which is vitest-only) and
+cover: the mandatory prototype banner's exact text, no horizontal overflow at
+either viewport, primary nav between routes, disconnected-wallet copy on all
+three routes (wallet stays disconnected — no seed wallet or validator
+required for this pass), and real `Tab`-key keyboard navigation to the
+Connect button with a visible focus ring. Screenshots land in
+`docs/04-ui-ux/screenshots/`. See `docs/audits/IMPL-UI-PLAYWRIGHT-REPORT.md`
+for the full method, environment gotchas (this sandbox needed a manual
+Chromium download — see the report if `playwright install` ever times out
+here again), and the real mobile-overflow bug this pass found and fixed in
+`Sidenav.tsx`.
+
+Manual verification against the local validator remains the release gate for
+actual on-chain transactions — three scripts exercise the app's REAL
+`src/lib/*` modules (PDA derivation, account decoding, instruction building,
+error mapping) against genuine on-chain state, not a mock:
 
 ```bash
 # after seeding the local validator (see above)
@@ -84,6 +107,19 @@ and a raw `getProgramAccounts` memcmp on `(market, owner)` alone also matches
 — so position fetches now go through `program.account.permaPosition.all()`,
 which adds the discriminator check that disambiguates them. See
 `docs/audits/IMPL-UI-TRADE-PORTFOLIO-REPORT.md` for the full record.
+
+### Admin: pause / unpause / risk params (component 10)
+
+```bash
+set -a; source .env.local; set +a        # tsx scripts read env from the shell
+yarn pause-market                        # Market.is_paused = true (idempotent)
+yarn unpause-market
+yarn set-risk-params <horizon_slots> <buffer_usdc>   # rejects overflowing values
+```
+
+Signs with `~/.config/solana/id.json` (the `GlobalConfig` admin). While paused
+the UI shows a **Paused** badge and disables the Trade CTA and Deposit form;
+Withdraw / Close / Settle keep working — pausing never traps an open position.
 
 ## What this is, and isn't
 

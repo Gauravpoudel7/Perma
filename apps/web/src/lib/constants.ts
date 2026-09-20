@@ -9,27 +9,38 @@ import { PublicKey } from "@solana/web3.js";
  * for speed. See docs/adr and IMPL-UI-FEASIBILITY.md Q2.
  */
 
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) {
+/**
+ * `process.env.NEXT_PUBLIC_*` must appear as a static, literal property
+ * access at each call site — webpack's DefinePlugin only inlines those
+ * exact expressions into the client bundle. Reading via a dynamic key
+ * (`process.env[name]`) is invisible to that replacement, so the value
+ * silently comes back `undefined` in the browser even though the same
+ * code works fine server-side (where real `process.env` exists at
+ * runtime). This function takes the already-read value, never the name,
+ * to avoid reintroducing that bug.
+ */
+function requireEnv(name: string, value: string | undefined): string {
+  if (!value) {
     throw new Error(
       `Missing ${name}. Copy apps/web/.env.example to .env.local and fill it in.`
     );
   }
-  return v;
+  return value;
 }
 
 export const CLUSTER = (process.env.NEXT_PUBLIC_CLUSTER ?? "localnet") as
   | "localnet"
   | "devnet";
 
-export const RPC_URL = requireEnv("NEXT_PUBLIC_RPC_URL");
+export const RPC_URL = requireEnv("NEXT_PUBLIC_RPC_URL", process.env.NEXT_PUBLIC_RPC_URL);
 
 export const PERMA_PROGRAM_ID = new PublicKey(
-  requireEnv("NEXT_PUBLIC_PERMA_PROGRAM_ID")
+  requireEnv("NEXT_PUBLIC_PERMA_PROGRAM_ID", process.env.NEXT_PUBLIC_PERMA_PROGRAM_ID)
 );
 
-export const WHIRLPOOL = new PublicKey(requireEnv("NEXT_PUBLIC_WHIRLPOOL"));
+export const WHIRLPOOL = new PublicKey(
+  requireEnv("NEXT_PUBLIC_WHIRLPOOL", process.env.NEXT_PUBLIC_WHIRLPOOL)
+);
 
 /** The Orca Whirlpool program. Public, stable, same address on every cluster. */
 export const WHIRLPOOL_PROGRAM_ID = new PublicKey(

@@ -167,4 +167,9 @@ pub enum PermaError {
     /// `0x25` - `UserCollateral.open_longs == MAX_OPEN_LONGS`.
     #[msg("Too many open longs")]
     TooManyOpenLongs,
+    /// `0x35` - `set_market_risk_params` rejected: zero horizon/buffer, or the
+    /// margin for `risk::MARGIN_LIQUIDITY_BOUND` (×`MAX_OPEN_LONGS`) would
+    /// overflow `u64` and brick withdraws (ADR-0003 forward requirement).
+    #[msg("Risk parameters would overflow the margin bound")]
+    InvalidRiskParams,
 }

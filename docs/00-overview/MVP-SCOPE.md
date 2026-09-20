@@ -18,12 +18,12 @@ To prove, on-chain, that Solana concentrated liquidity can power a complete perp
 - **Shorts**: Must actually call Orca CPI to add liquidity to the Whirlpool.
 - **Longs**: Can only be opened if corresponding short liquidity exists in that range.
 - **Lifecycle**: 
-    - `mint_position` $\rightarrow$ `burn_position` (Close/Settle).
+    - `mint_options` $\rightarrow$ `burn_options` (Close/Settle).
     - Streaming premium accumulation tracked on-chain.
 
 ### 3. Financials & Risk
 - **Collateral**: SOL and/or USDC deposits.
-- **Solvency**: on every `withdraw_collateral` and long `mint_position`, free USDC must cover the user's open-long premium liability plus a horizon margin — no price input ([component 09](../02-mvp-components/09-risk-solvency.md), [ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)).
+- **Solvency**: Margin-based checks on every `mint` and `withdraw` operation.
 - **Settlement**: P&L + Premium settled into collateral balances upon burning the position.
 
 ### 4. User Experience
@@ -47,6 +47,11 @@ The team may implement **at most one** of the following:
 - **Protocol Token/DAO**: Governance tokens or vault-based yield sharing.
 - **Advanced Indexing**: Sophisticated historical data analytics (minimal RPC cache is OK).
 - **Mainnet Risk Capital**: No production-grade fund management.
+
+
+## After Fair
+
+When the Fair release gate is green — including components **10 (pause/admin)** and **11 (events)** — Protocol V1 work is specified under [`docs/09-post-mvp/`](../09-post-mvp/). That folder does **not** expand Fair scope. Do not start post-MVP implementation while 10/11 remain open.
 
 ---
 

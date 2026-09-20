@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. Format follows [`08-living-docs/CHANGELOG-POLICY.md`](08-living-docs/CHANGELOG-POLICY.md).
 
+## [0.10.0] - 2026-09-21 — component 10: Pause / Admin
+### Added
+- `pause_market` / `unpause_market` (admin-only, idempotent, emit `MarketPauseSet` / `MarketPauseCleared` on transition); `set_market_risk_params` (admin-only, writes the two ADR-0003 risk fields, re-validates overflow via `risk::validate_risk_params` at `MARGIN_LIQUIDITY_BOUND = 2^52` × `MAX_OPEN_LONGS`, emits `MarketRiskParamsSet`); `factory::require_admin`; `risk::required_margin_with` (shared math, `required_margin` delegates); error `InvalidRiskParams` (6034, appended); `tests/pause-admin.ts` (17); `apps/web` `yarn pause-market` / `unpause-market` / `set-risk-params`.
+### Changed
+- **Exit Guaranteed**: pause guards removed from `burn_position`, `settle_premium`, `withdraw_collateral`, `unlock_collateral`; kept on `mint_position`, `deposit_collateral`, `lock_collateral`. Adapter `open`/`add` pause checks now return `MarketPaused` (were `WhirlpoolNotAllowlisted`). UI `DepositForm` no longer allows-while-paused. Release gate: 93 passing (was 76), `yarn test:unit` 66 (was 60).
+### Deferred
+- `pause_global` (would resize `GlobalConfig`); multisig admin.
+
 ## [0.9.0] - 2026-09-20 — component 09: Risk & Solvency
 ### Added
 - `Market.long_margin_horizon_slots` / `long_margin_buffer_usdc` (`risk_defaults`), `UserCollateral.open_longs`; `risk.rs` rewritten (`required_margin`, `required_free_usdc`, `check_withdraw_allowed`, `check_long_mint_allowed`, `collect_open_longs`, `MAX_OPEN_LONGS = 8`); `premium::projected_index` / `payable_if_settled_now` (pure); errors `InsolventMint`, `MissingOpenLong`, `TooManyOpenLongs` (appended); `tests/risk-solvency.ts` (10).

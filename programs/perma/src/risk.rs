@@ -49,20 +49,84 @@ pub const MAX_OPEN_LONGS: u16 = 8;
 ///
 /// With `risk_defaults` this is `L + 1_000_000` exactly - see `state.rs`.
 pub(crate) fn required_margin(market: &Market, liquidity: u128) -> Result<u64> {
-    let scaled = (market.long_margin_horizon_slots as u128)
-        .checked_mul(market.premium_rate as u128)
+    required_margin_with(
+        market.long_margin_horizon_slots,
+        market.premium_rate,
+        market.premium_multiplier,
+        market.long_margin_buffer_usdc,
+        liquidity,
+    )
+}
+
+/// The margin formula over explicit parameters, so `set_market_risk_params`
+/// can re-validate a *candidate* horizon/buffer through the exact checked path
+/// the runtime uses (ADR-0003 forward requirement). `required_margin` is a
+/// delegate to this; there is one implementation.
+pub(crate) fn required_margin_with(
+    horizon_slots: u64,
+    premium_rate: u64,
+    premium_multiplier: u64,
+    buffer_usdc: u64,
+    liquidity: u128,
+) -> Result<u64> {
+    let scaled = (horizon_slots as u128)
+        .checked_mul(premium_rate as u128)
         .ok_or(PermaError::MathOverflow)?
         .checked_mul(liquidity)
         .ok_or(PermaError::MathOverflow)?
-        .checked_mul(market.premium_multiplier as u128)
+        .checked_mul(premium_multiplier as u128)
         .ok_or(PermaError::MathOverflow)?;
     let q = scaled / PREMIUM_SCALE;
     let r = scaled % PREMIUM_SCALE;
     let per_horizon = q + u128::from(r != 0);
     let total = per_horizon
-        .checked_add(market.long_margin_buffer_usdc as u128)
+        .checked_add(buffer_usdc as u128)
         .ok_or(PermaError::MathOverflow)?;
     u64::try_from(total).map_err(|_| PermaError::MathOverflow.into())
+}
+
+/// Largest single-position liquidity the risk parameters must stay solvent
+/// for. `set_market_risk_params` rejects any horizon/buffer whose margin at
+/// this L - summed over `MAX_OPEN_LONGS` positions, as `required_free_usdc`
+/// does - would not fit `u64`, because an overflow at *withdraw* time locks
+/// the user's funds (ADR-0003).
+///
+/// `2^52 ≈ 4.5e15`: ~4.5e7× the largest demo position (`1e8`), ≈ $800k in the
+/// narrowest 8-tick band of a SOL/USDC pool at ~$200. The trade-off it fixes:
+/// `8 × (horizon × rate × mult / 1e12) × 2^52 ≤ u64::MAX` ⇒ factor ≤ 512 ⇒
+/// at the demo rate/multiplier the admissible horizon is ≤ ~512_000 slots
+/// (~2.4 days). Raising this bound tightens that ceiling; see
+/// `IMPL-10-FEASIBILITY.md` Q4 before changing it.
+pub const MARGIN_LIQUIDITY_BOUND: u128 = 1 << 52;
+
+/// Gate a candidate `(horizon, buffer)` for `set_market_risk_params`.
+///
+/// Rejects a zero horizon (margin would collapse to the buffer for any L) or
+/// zero buffer (the ADR's flat floor), then proves the margin at
+/// [`MARGIN_LIQUIDITY_BOUND`] - and its `MAX_OPEN_LONGS`-fold sum - fits
+/// `u64` under the market's *current* rate and multiplier. The formula is
+/// monotone in L, so passing at the bound covers every smaller position.
+pub(crate) fn validate_risk_params(
+    horizon_slots: u64,
+    buffer_usdc: u64,
+    premium_rate: u64,
+    premium_multiplier: u64,
+) -> Result<()> {
+    require!(horizon_slots > 0, PermaError::InvalidRiskParams);
+    require!(buffer_usdc > 0, PermaError::InvalidRiskParams);
+    let margin = required_margin_with(
+        horizon_slots,
+        premium_rate,
+        premium_multiplier,
+        buffer_usdc,
+        MARGIN_LIQUIDITY_BOUND,
+    )
+    .map_err(|_| error!(PermaError::InvalidRiskParams))?;
+    let sum = u128::from(margin)
+        .checked_mul(u128::from(MAX_OPEN_LONGS))
+        .ok_or(PermaError::InvalidRiskParams)?;
+    require!(sum <= u128::from(u64::MAX), PermaError::InvalidRiskParams);
+    Ok(())
 }
 
 /// Free USDC this user must keep: legacy `premium_owed_usdc` plus, for every
@@ -305,6 +369,72 @@ mod tests {
     fn margin_overflow_is_an_error_not_a_wrap() {
         let m = market();
         assert!(required_margin(&m, u128::MAX).is_err());
+    }
+
+    // --- validate_risk_params (component 10, ADR-0003 forward requirement) --
+
+    const RATE: u64 = premium_defaults::PREMIUM_RATE;
+    const MULT: u64 = premium_defaults::PREMIUM_MULTIPLIER;
+    const HORIZON: u64 = risk_defaults::LONG_MARGIN_HORIZON_SLOTS;
+    const BUFFER: u64 = risk_defaults::LONG_MARGIN_BUFFER_USDC;
+
+    /// The shipped defaults pass, with the exact headroom claimed in
+    /// `IMPL-10-FEASIBILITY.md` Q4.
+    #[test]
+    fn demo_defaults_pass_the_bound_with_headroom() {
+        assert!(validate_risk_params(HORIZON, BUFFER, RATE, MULT).is_ok());
+        let at_bound =
+            required_margin_with(HORIZON, RATE, MULT, BUFFER, MARGIN_LIQUIDITY_BOUND).unwrap();
+        assert_eq!(at_bound, 4_503_599_628_370_496, "factor 1: L + buffer");
+        assert_eq!(
+            u128::from(at_bound) * u128::from(MAX_OPEN_LONGS),
+            36_028_797_026_963_968
+        );
+    }
+
+    /// A single margin that still fits u64 but whose 8-fold sum does not is
+    /// exactly the withdraw-time brick the ADR names; the sum guard catches it.
+    #[test]
+    fn sum_over_max_open_longs_is_guarded() {
+        let horizon = 1_000_000; // factor 1000: margin(BOUND) ≈ 4.5e18 fits, ×8 does not
+        assert!(required_margin_with(horizon, RATE, MULT, BUFFER, MARGIN_LIQUIDITY_BOUND).is_ok());
+        assert!(validate_risk_params(horizon, BUFFER, RATE, MULT).is_err());
+    }
+
+    #[test]
+    fn product_chain_overflow_is_rejected() {
+        assert!(validate_risk_params(u64::MAX, BUFFER, RATE, MULT).is_err());
+    }
+
+    #[test]
+    fn zero_horizon_or_buffer_is_rejected() {
+        assert!(validate_risk_params(0, BUFFER, RATE, MULT).is_err());
+        assert!(validate_risk_params(HORIZON, 0, RATE, MULT).is_err());
+    }
+
+    /// Every rejection surfaces as `InvalidRiskParams`, never a bare
+    /// `MathOverflow`, so the admin and the tests see one name.
+    #[test]
+    fn rejections_are_invalid_risk_params() {
+        for (h, b) in [(0, BUFFER), (HORIZON, 0), (1_000_000, BUFFER), (u64::MAX, BUFFER)] {
+            let err = validate_risk_params(h, b, RATE, MULT).unwrap_err();
+            assert!(
+                err.to_string().contains("InvalidRiskParams"),
+                "({h}, {b}) -> {err}"
+            );
+        }
+    }
+
+    /// The delegate refactor changed nothing: `required_margin` == `_with`.
+    #[test]
+    fn required_margin_delegates_to_required_margin_with() {
+        let m = market();
+        for l in [0u128, 1, 1_000, 50_000_000, MARGIN_LIQUIDITY_BOUND] {
+            assert_eq!(
+                required_margin(&m, l).unwrap(),
+                required_margin_with(HORIZON, RATE, MULT, BUFFER, l).unwrap()
+            );
+        }
     }
 
     // --- required_free_usdc / gates ----------------------------------------

@@ -27,6 +27,13 @@ pub fn validate_allowlist_entry(whirlpool: &Pubkey) -> Result<()> {
     Ok(())
 }
 
+/// Only the recorded `GlobalConfig.admin` may call an admin instruction
+/// (`create_market`, `pause_market`, `unpause_market`, `set_market_risk_params`).
+pub fn require_admin(config: &GlobalConfig, admin: &Pubkey) -> Result<()> {
+    require_keys_eq!(*admin, config.admin, PermaError::Unauthorized);
+    Ok(())
+}
+
 /// Gate `create_market` on admin identity and the allowlist.
 ///
 /// Order matters, cheapest and most restrictive first:
@@ -47,7 +54,7 @@ pub fn authorize_create_market(
     admin: &Pubkey,
     whirlpool: &Pubkey,
 ) -> Result<()> {
-    require_keys_eq!(*admin, config.admin, PermaError::Unauthorized);
+    require_admin(config, admin)?;
     require_keys_eq!(
         *whirlpool,
         config.allowlisted_whirlpool,

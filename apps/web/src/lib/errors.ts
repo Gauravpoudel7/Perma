@@ -28,7 +28,7 @@ export const PERMA_ERROR_COPY: Record<string, string> = {
   ZeroAmount: "Enter an amount greater than zero.",
   MarketPaused: "Trading is paused. Open positions can still be closed.",
   PoolNotAllowlisted: "This pool isn't allowlisted for PERMA.",
-  Unauthorized: "You aren't authorized to settle this position.",
+  Unauthorized: "You aren't authorized to do this.",
   MarketAlreadyExists: "This market already exists.",
   InvalidAllowlistEntry: "Invalid allowlist configuration.",
   WrongWhirlpoolProgram: "Unexpected Whirlpool program.",
@@ -47,6 +47,7 @@ export const PERMA_ERROR_COPY: Record<string, string> = {
   InsolventMint: "Your free USDC can't cover this long's required margin.",
   MissingOpenLong: "Your open positions changed since this was prepared. Please retry.",
   TooManyOpenLongs: "You've reached the maximum of 8 open longs.",
+  InvalidRiskParams: "Those risk parameters would overflow the margin bound.",
 };
 
 export interface ParsedPermaError {

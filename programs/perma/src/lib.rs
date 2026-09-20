@@ -120,8 +120,8 @@ pub mod perma {
         market.premium_multiplier = premium_defaults::PREMIUM_MULTIPLIER;
 
         // Risk parameters (component 09, ADR-0003). Demo values, not fair
-        // value; a setter belongs to component 10 and must re-validate the
-        // overflow bound in `risk::required_margin` before it ships.
+        // value; `set_market_risk_params` (component 10) changes them, and
+        // re-validates the overflow bound in `risk::validate_risk_params`.
         market.long_margin_horizon_slots = risk_defaults::LONG_MARGIN_HORIZON_SLOTS;
         market.long_margin_buffer_usdc = risk_defaults::LONG_MARGIN_BUFFER_USDC;
 
@@ -132,6 +132,81 @@ pub mod perma {
             admin: ctx.accounts.admin.key(),
             premium_rate: market.premium_rate,
             premium_multiplier: market.premium_multiplier,
+        });
+        Ok(())
+    }
+
+    /// Trip the circuit breaker (component 10). Admin only.
+    ///
+    /// Blocks every path that *adds* risk or adds funds that could back new
+    /// risk - `mint_position`, `deposit_collateral`, `lock_collateral`,
+    /// `adapter_open_position`, `adapter_add_liquidity`. Every exit path stays
+    /// open, subject to its own gates: `burn_position`, `settle_premium`,
+    /// `withdraw_collateral` (09 solvency), `unlock_collateral`
+    /// (`PositionsOutstanding`), and the adapter close/remove harness. The
+    /// full matrix is `docs/02-mvp-components/10-pause-admin.md`.
+    ///
+    /// Idempotent: pausing an already-paused market is a no-op and emits
+    /// nothing, so an ops script can retry without producing duplicate events.
+    pub fn pause_market(ctx: Context<SetMarketPause>) -> Result<()> {
+        factory::require_admin(&ctx.accounts.global_config, &ctx.accounts.admin.key())?;
+        let market = &mut ctx.accounts.market;
+        if market.is_paused {
+            return Ok(());
+        }
+        market.is_paused = true;
+        emit!(MarketPauseSet {
+            market: market.key(),
+            admin: ctx.accounts.admin.key(),
+        });
+        Ok(())
+    }
+
+    /// Clear the circuit breaker (component 10). Admin only. Idempotent, as
+    /// `pause_market` is.
+    pub fn unpause_market(ctx: Context<SetMarketPause>) -> Result<()> {
+        factory::require_admin(&ctx.accounts.global_config, &ctx.accounts.admin.key())?;
+        let market = &mut ctx.accounts.market;
+        if !market.is_paused {
+            return Ok(());
+        }
+        market.is_paused = false;
+        emit!(MarketPauseCleared {
+            market: market.key(),
+            admin: ctx.accounts.admin.key(),
+        });
+        Ok(())
+    }
+
+    /// Set the ADR-0003 long-margin parameters (component 10). Admin only.
+    ///
+    /// Writes exactly `long_margin_horizon_slots` and `long_margin_buffer_usdc`
+    /// - never `premium_rate` / `premium_multiplier`, which have no setter in
+    /// Fair MVP. Before writing, `risk::validate_risk_params` proves the
+    /// margin at `risk::MARGIN_LIQUIDITY_BOUND` (×`MAX_OPEN_LONGS`) still fits
+    /// `u64` under the market's current rate and multiplier: an overflow at
+    /// mint merely fails the mint, but an overflow at *withdraw* would lock
+    /// every existing long's collateral. Rejects with `InvalidRiskParams`.
+    pub fn set_market_risk_params(
+        ctx: Context<SetMarketRiskParams>,
+        long_margin_horizon_slots: u64,
+        long_margin_buffer_usdc: u64,
+    ) -> Result<()> {
+        factory::require_admin(&ctx.accounts.global_config, &ctx.accounts.admin.key())?;
+        let market = &mut ctx.accounts.market;
+        risk::validate_risk_params(
+            long_margin_horizon_slots,
+            long_margin_buffer_usdc,
+            market.premium_rate,
+            market.premium_multiplier,
+        )?;
+        market.long_margin_horizon_slots = long_margin_horizon_slots;
+        market.long_margin_buffer_usdc = long_margin_buffer_usdc;
+        emit!(MarketRiskParamsSet {
+            market: market.key(),
+            admin: ctx.accounts.admin.key(),
+            long_margin_horizon_slots,
+            long_margin_buffer_usdc,
         });
         Ok(())
     }
@@ -246,7 +321,6 @@ pub mod perma {
         amount_a: u64,
         amount_b: u64,
     ) -> Result<()> {
-        require!(!ctx.accounts.market.is_paused, PermaError::MarketPaused);
         require!(amount_a > 0 || amount_b > 0, PermaError::ZeroAmount);
 
         let market = &ctx.accounts.market;
@@ -352,7 +426,6 @@ pub mod perma {
     /// component 05 increments it on mint, so this is inert today and prevents
     /// unlocking collateral behind a live short the moment mint ships.
     pub fn unlock_collateral(ctx: Context<AdjustLock>, amount_a: u64, amount_b: u64) -> Result<()> {
-        require!(!ctx.accounts.market.is_paused, PermaError::MarketPaused);
         require!(amount_a > 0 || amount_b > 0, PermaError::ZeroAmount);
 
         let user = &mut ctx.accounts.user_collateral;
@@ -602,8 +675,6 @@ pub mod perma {
     /// **P&L is not settled here.** Component 09 owns valuation; this moves
     /// premium and nothing else.
     pub fn settle_premium(mut ctx: Context<SettlePremium>) -> Result<()> {
-        require!(!ctx.accounts.market.is_paused, PermaError::MarketPaused);
-
         let market_key = ctx.accounts.market.key();
         let tick_lower = ctx.accounts.perma_position.tick_lower;
         let tick_upper = ctx.accounts.perma_position.tick_upper;
@@ -659,7 +730,6 @@ pub mod perma {
         token_min_a: u64,
         token_min_b: u64,
     ) -> Result<()> {
-        require!(!ctx.accounts.market.is_paused, PermaError::MarketPaused);
         require!(
             ctx.accounts.perma_position.status == position_status::OPEN,
             PermaError::PositionAlreadyClosed
@@ -817,7 +887,7 @@ pub mod perma {
         nonce: u64,
     ) -> Result<()> {
         let market = &ctx.accounts.market;
-        require!(!market.is_paused, PermaError::WhirlpoolNotAllowlisted);
+        require!(!market.is_paused, PermaError::MarketPaused);
         require_keys_eq!(
             ctx.accounts.whirlpool_program.key(),
             adapter::whirlpool_program_id(),
@@ -959,7 +1029,7 @@ pub mod perma {
         token_max_b: u64,
     ) -> Result<()> {
         let market = &ctx.accounts.market;
-        require!(!market.is_paused, PermaError::WhirlpoolNotAllowlisted);
+        require!(!market.is_paused, PermaError::MarketPaused);
         reject_harness_if_longs(
             &ctx.accounts.range_state,
             &market.key(),
@@ -2450,6 +2520,34 @@ pub struct CreateMarket<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// `pause_market` / `unpause_market` (component 10). No payer, no `mut` on
+/// the signer: the only write is the existing `Market.is_paused` byte.
+#[derive(Accounts)]
+pub struct SetMarketPause<'info> {
+    /// Must equal `global_config.admin`; checked in the handler.
+    pub admin: Signer<'info>,
+
+    #[account(seeds = [seeds::GLOBAL_CONFIG], bump = global_config.bump)]
+    pub global_config: Account<'info, GlobalConfig>,
+
+    #[account(mut, seeds = [seeds::MARKET, market.whirlpool.as_ref()], bump = market.bump)]
+    pub market: Account<'info, Market>,
+}
+
+/// `set_market_risk_params` (component 10). Same shape as `SetMarketPause`;
+/// writes the two existing risk fields in place - no realloc.
+#[derive(Accounts)]
+pub struct SetMarketRiskParams<'info> {
+    /// Must equal `global_config.admin`; checked in the handler.
+    pub admin: Signer<'info>,
+
+    #[account(seeds = [seeds::GLOBAL_CONFIG], bump = global_config.bump)]
+    pub global_config: Account<'info, GlobalConfig>,
+
+    #[account(mut, seeds = [seeds::MARKET, market.whirlpool.as_ref()], bump = market.bump)]
+    pub market: Account<'info, Market>,
+}
+
 #[derive(Accounts)]
 pub struct ValidateShortRange<'info> {
     #[account(seeds = [seeds::MARKET, market.whirlpool.as_ref()], bump = market.bump)]
@@ -2758,6 +2856,30 @@ pub struct MarketCreated {
     pub admin: Pubkey,
     pub premium_rate: u64,
     pub premium_multiplier: u64,
+}
+
+/// Component 10. Named `*PauseSet` / `*PauseCleared` rather than
+/// `MarketPaused` / `MarketUnpaused` (the spec's draft names) because
+/// `PermaError::MarketPaused` already owns that identifier. Emitted only on a
+/// real transition - see `pause_market`.
+#[event]
+pub struct MarketPauseSet {
+    pub market: Pubkey,
+    pub admin: Pubkey,
+}
+
+#[event]
+pub struct MarketPauseCleared {
+    pub market: Pubkey,
+    pub admin: Pubkey,
+}
+
+#[event]
+pub struct MarketRiskParamsSet {
+    pub market: Pubkey,
+    pub admin: Pubkey,
+    pub long_margin_horizon_slots: u64,
+    pub long_margin_buffer_usdc: u64,
 }
 
 #[event]

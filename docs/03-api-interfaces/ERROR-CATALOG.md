@@ -42,9 +42,9 @@ Raised by [`07-premium-engine.md`](../02-mvp-components/07-premium-engine.md) an
 
 | Label | On-chain | Name | Description |
 |---|---|---|---|
-| `0x20` | 6013 | `MarketPaused` | `Market.is_paused` is set. **No instruction sets it in Fair MVP** (component 10 unbuilt); it is `false` from `create_market` onward. |
+| `0x20` | 6013 | `MarketPaused` | `Market.is_paused` is set (by `pause_market`, component 10) and a **risk-increasing** instruction was called: `mint_position`, `deposit_collateral`, `lock_collateral`, `adapter_open_position`, `adapter_add_liquidity`. Exit paths (burn / settle / withdraw / unlock / adapter close+remove) never raise it. |
 | `0x21` | 6014 | `PoolNotAllowlisted` | The Whirlpool is not `GlobalConfig.allowlisted_whirlpool`. |
-| `0x30` | 6015 | `Unauthorized` | Caller is not the `GlobalConfig` admin, or a non-owner tried to settle a **short** (long settle is permissionless). |
+| `0x30` | 6015 | `Unauthorized` | Caller is not the `GlobalConfig` admin (`create_market`, `pause_market`, `unpause_market`, `set_market_risk_params`), or a non-owner tried to settle a **short** (long settle is permissionless). |
 | `0x31` | 6016 | `MarketAlreadyExists` | Documented mapping; Anchor's `init` rejects the duplicate before this is reached. |
 | `0x32` | 6017 | `InvalidAllowlistEntry` | The allowlist entry is the default pubkey. |
 | `0x33` | 6030 | `InvalidWhirlpoolAccount` | The Whirlpool account failed to deserialize (wrong size or discriminator). |
@@ -75,6 +75,7 @@ Appended to `PermaError` (so nothing above shifted). See [`09-risk-solvency.md`]
 | `0x22` | 6031 | `InsolventMint` | Free USDC cannot cover existing long liability + `required_margin(L)` for the new long. |
 | `0x24` | 6032 | `MissingOpenLong` | Remaining accounts are not exactly the user's open longs (`count != open_longs`, or an account failed validation). |
 | `0x25` | 6033 | `TooManyOpenLongs` | `open_longs == MAX_OPEN_LONGS` (8). |
+| `0x35` | 6034 | `InvalidRiskParams` | `set_market_risk_params` (component 10) rejected: zero horizon or buffer, or the margin at `risk::MARGIN_LIQUIDITY_BOUND` × `MAX_OPEN_LONGS` would overflow `u64` and brick withdraws (ADR-0003). Nothing written. |
 
 ## 7. Deferred — not defined, not raised
 

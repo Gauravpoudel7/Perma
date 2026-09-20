@@ -1866,6 +1866,184 @@ export type Perma = {
       ]
     },
     {
+      "name": "pauseMarket",
+      "docs": [
+        "Trip the circuit breaker (component 10). Admin only.",
+        "",
+        "Blocks every path that *adds* risk or adds funds that could back new",
+        "risk - `mint_position`, `deposit_collateral`, `lock_collateral`,",
+        "`adapter_open_position`, `adapter_add_liquidity`. Every exit path stays",
+        "open, subject to its own gates: `burn_position`, `settle_premium`,",
+        "`withdraw_collateral` (09 solvency), `unlock_collateral`",
+        "(`PositionsOutstanding`), and the adapter close/remove harness. The",
+        "full matrix is `docs/02-mvp-components/10-pause-admin.md`.",
+        "",
+        "Idempotent: pausing an already-paused market is a no-op and emits",
+        "nothing, so an ops script can retry without producing duplicate events."
+      ],
+      "discriminator": [
+        216,
+        238,
+        4,
+        164,
+        65,
+        11,
+        162,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Must equal `global_config.admin`; checked in the handler."
+          ],
+          "signer": true
+        },
+        {
+          "name": "globalConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.whirlpool",
+                "account": "market"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "setMarketRiskParams",
+      "docs": [
+        "Set the ADR-0003 long-margin parameters (component 10). Admin only.",
+        "",
+        "Writes exactly `long_margin_horizon_slots` and `long_margin_buffer_usdc`",
+        "- never `premium_rate` / `premium_multiplier`, which have no setter in",
+        "Fair MVP. Before writing, `risk::validate_risk_params` proves the",
+        "margin at `risk::MARGIN_LIQUIDITY_BOUND` (×`MAX_OPEN_LONGS`) still fits",
+        "`u64` under the market's current rate and multiplier: an overflow at",
+        "mint merely fails the mint, but an overflow at *withdraw* would lock",
+        "every existing long's collateral. Rejects with `InvalidRiskParams`."
+      ],
+      "discriminator": [
+        120,
+        32,
+        209,
+        165,
+        167,
+        72,
+        217,
+        50
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Must equal `global_config.admin`; checked in the handler."
+          ],
+          "signer": true
+        },
+        {
+          "name": "globalConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.whirlpool",
+                "account": "market"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "longMarginHorizonSlots",
+          "type": "u64"
+        },
+        {
+          "name": "longMarginBufferUsdc",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "settlePremium",
       "docs": [
         "**Settle premium in cash.** The instruction component 08 exists for.",
@@ -2228,6 +2406,82 @@ export type Perma = {
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "unpauseMarket",
+      "docs": [
+        "Clear the circuit breaker (component 10). Admin only. Idempotent, as",
+        "`pause_market` is."
+      ],
+      "discriminator": [
+        219,
+        203,
+        199,
+        170,
+        212,
+        45,
+        170,
+        80
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Must equal `global_config.admin`; checked in the handler."
+          ],
+          "signer": true
+        },
+        {
+          "name": "globalConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.whirlpool",
+                "account": "market"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
     },
     {
       "name": "validateShortRange",
@@ -2702,6 +2956,45 @@ export type Perma = {
       ]
     },
     {
+      "name": "marketPauseCleared",
+      "discriminator": [
+        28,
+        250,
+        219,
+        15,
+        67,
+        24,
+        231,
+        254
+      ]
+    },
+    {
+      "name": "marketPauseSet",
+      "discriminator": [
+        225,
+        139,
+        3,
+        28,
+        185,
+        26,
+        121,
+        144
+      ]
+    },
+    {
+      "name": "marketRiskParamsSet",
+      "discriminator": [
+        14,
+        139,
+        38,
+        111,
+        252,
+        109,
+        229,
+        223
+      ]
+    },
+    {
       "name": "positionClosed",
       "discriminator": [
         157,
@@ -2950,6 +3243,11 @@ export type Perma = {
       "code": 6033,
       "name": "tooManyOpenLongs",
       "msg": "Too many open longs"
+    },
+    {
+      "code": 6034,
+      "name": "invalidRiskParams",
+      "msg": "Risk parameters would overflow the margin bound"
     }
   ],
   "types": [
@@ -3473,6 +3771,68 @@ export type Perma = {
           },
           {
             "name": "premiumMultiplier",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "marketPauseCleared",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "marketPauseSet",
+      "docs": [
+        "Component 10. Named `*PauseSet` / `*PauseCleared` rather than",
+        "`MarketPaused` / `MarketUnpaused` (the spec's draft names) because",
+        "`PermaError::MarketPaused` already owns that identifier. Emitted only on a",
+        "real transition - see `pause_market`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "marketRiskParamsSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "longMarginHorizonSlots",
+            "type": "u64"
+          },
+          {
+            "name": "longMarginBufferUsdc",
             "type": "u64"
           }
         ]
