@@ -1,8 +1,26 @@
 # RELEASE GATE: MVP Demo Readiness
 
-Hard blocking criteria before the PERMA MVP is declared "Ready to Present", plus the exact commands to verify each one. **Follow this file top to bottom without improvising.** Every command states its working directory. `$REPO` is the repository root (the directory containing `Anchor.toml`).
+## Fair MVP sign-off — **PASSED** (2026-09-21)
 
-> These commands describe the MVP as specified. Until the corresponding code exists, a step that fails because a script or suite is missing is a **build gap**, not a gate failure — record it in §7 and move on.
+| Field | Value |
+|---|---|
+| **Status** | **Fair MVP release gate GREEN** |
+| **Components** | **01–11** shipped (10 pause/admin, 11 Fair-thin events) |
+| **Integration suite** | **102 passing / 0 failing**, forward and reversed, fresh localnet ledger |
+| **Unit** | `yarn test:unit` **66** green |
+| **Web** | typecheck / unit / copy / build / Playwright e2e green (as of Component 11 ship) |
+| **On-chain** | Program `4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt` on localnet; thin Trade / Portfolio / Vault UI |
+| **Evidence** | [`CHANGELOG.md`](../CHANGELOG.md) `0.10.0`–`0.11.0`; [`IMPL-10-PAUSE-ADMIN-REPORT.md`](../audits/IMPL-10-PAUSE-ADMIN-REPORT.md); [`IMPL-11-EVENTS-INDEXING-REPORT.md`](../audits/IMPL-11-EVENTS-INDEXING-REPORT.md); [`COMPONENT-INDEX.md`](../02-mvp-components/COMPONENT-INDEX.md) |
+| **Next** | Protocol V1 **P1** (production hardening) per [`docs/09-post-mvp/ROADMAP.md`](../09-post-mvp/ROADMAP.md). Do **not** reopen Fair scope. |
+| **Honesty** | Prototype. Not audited. Single pool. Not production mainnet risk capital. |
+
+**Checklist notes (Fair honesty):** S1–S5, A1–A3, Q1, Q3 met by the green suites above. Q2 anti-slop remains an ongoing UI bar. E1/E2: localnet product loop (deposit → short → long → portfolio) verified by hand; Fair has **no mark P&L** ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)) — UI shows positions, collateral, and premium, not CEX-style P&L%. Devnet full `E2E-DEMO-SCRIPT` remains optional ops polish, not a Fair reopen.
+
+---
+
+Hard blocking criteria before PERMA Fair MVP is declared ready. **Follow this file top to bottom without improvising.** Every command states its working directory. `$REPO` is the repository root (the directory containing `Anchor.toml`).
+
+> Historical note: steps that once failed because a suite was missing were build gaps. As of the sign-off above, the Fair suites exist and are green.
 
 ---
 

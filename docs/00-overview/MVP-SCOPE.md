@@ -49,9 +49,17 @@ The team may implement **at most one** of the following:
 - **Mainnet Risk Capital**: No production-grade fund management.
 
 
+## Fair status — **COMPLETE** (2026-09-21)
+
+Fair MVP components **01–11** are shipped. The release gate is **GREEN** ([`RELEASE-GATE.md`](../06-testing/RELEASE-GATE.md)): **102/102** integration tests both orders on a fresh ledger, unit/UI checks green, pause/admin + Fair-thin events included.
+
+**What Fair proved:** Deposit → Short (real Orca liquidity) → Long (inventory-gated) → Stream premium → Settle cash; solvency (ADR-0003); emergency pause with Exit Guaranteed; thin Trade / Portfolio / Vault UI; event catalog + post-tx decode.
+
+**What Fair deliberately is not:** multi-leg, multi-pool, liquidation, force exercise, price-aware margin, P2 charts/indexer, mainnet risk capital.
+
 ## After Fair
 
-Components **10 (pause/admin)** and **11 (events, Fair-thin)** are shipped; the Fair release gate ([`RELEASE-GATE.md`](../06-testing/RELEASE-GATE.md)) is the remaining bar. Protocol V1 work is specified under [`docs/09-post-mvp/`](../09-post-mvp/). That folder does **not** expand Fair scope — the P2 indexer/product UI in particular is not Fair work.
+Protocol V1 work starts at **P1** under [`docs/09-post-mvp/`](../09-post-mvp/). That folder does **not** expand Fair scope — the P2 indexer/product UI in particular is not Fair work. Do not reopen components 01–11 unless a critical bugfix is required.
 
 ---
 

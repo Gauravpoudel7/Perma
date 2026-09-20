@@ -38,4 +38,6 @@ deposit collateral
 
 ---
 
-**🚩 STATUS:** Prototype. Not audited. Single pool. Not production mainnet risk capital.
+**✅ Fair MVP (01–11): COMPLETE** — release gate green 2026-09-21. See [`RELEASE-GATE.md`](../06-testing/RELEASE-GATE.md).
+
+**🚩 STATUS:** Prototype. Not audited. Single pool. Not production mainnet risk capital. Protocol V1 starts at P1 (`docs/09-post-mvp/`).

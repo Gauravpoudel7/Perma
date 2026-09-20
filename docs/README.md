@@ -17,7 +17,7 @@ This repository contains the comprehensive specification for the protocol's arch
 - **[UI/UX Brand System](04-ui-ux/BRAND-SYSTEM.md)** — The visual identity and design language.
 - **[Release Gate](06-testing/RELEASE-GATE.md)** — Criteria for demo readiness.
 - **[ADR-0001](adr/ADR-0001-orca-cpi-instruction-surface.md)** — Orca CPI instruction surface and position ownership model.
-- **[09 Post-MVP](09-post-mvp/README.md)** — Protocol V1 after Fair only (blocked until Fair gate incl. components **10** + **11**).
+- **[09 Post-MVP](09-post-mvp/README.md)** — Protocol V1 after Fair (**Fair gate GREEN** 2026-09-21; start at **P1**).
 
 ## 📂 Document Map
 
@@ -32,10 +32,10 @@ This repository contains the comprehensive specification for the protocol's arch
 | **06 Testing** | Quality Assurance | `TEST-STRATEGY.md`, `RELEASE-GATE.md` |
 | **07 Ops** | Deployment & Demo | `RUNBOOK-DEVNET.md`, `PRESENTATION-BRIEF.md` |
 | **08 Living Docs** | Maintenance | `DOC-GOVERNANCE.md`, `CHANGELOG-POLICY.md` |
-| **09 Post-MVP** | Protocol V1 after Fair (**not** Fair scope) | [`09-post-mvp/`](09-post-mvp/) — start only when Fair release gate is green including **10 pause** + **11 events** |
+| **09 Post-MVP** | Protocol V1 after Fair (**not** Fair scope) | [`09-post-mvp/`](09-post-mvp/) — Fair gate **GREEN**; begin at **P1** production hardening |
 | **ADR** | Architecture Decisions | [`adr/`](adr/) — numbered, immutable once Accepted |
 | **Audits** | Doc & Code Review | [`audits/`](audits/) — `DOCS-AUDIT-REPORT.md`, `DOCS-AUDIT-FIX-REPORT.md` |
 
 ---
 
-**⚠️ Disclaimer:** PERMA is currently in prototype phase. All specifications are subject to change. This is not production-ready software.
+**⚠️ Disclaimer:** Fair MVP (01–11) is complete on localnet. PERMA remains a prototype: not audited, single pool, not production mainnet risk capital.

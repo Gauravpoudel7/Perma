@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. Format follows [`08-living-docs/CHANGELOG-POLICY.md`](08-living-docs/CHANGELOG-POLICY.md).
 
+## [0.11.1] - 2026-09-21 — Fair MVP release gate CLOSED
+### Added
+- Formal Fair sign-off in [`06-testing/RELEASE-GATE.md`](06-testing/RELEASE-GATE.md): components **01–11** complete; gate **GREEN**.
+### Changed
+- [`00-overview/MVP-SCOPE.md`](00-overview/MVP-SCOPE.md), [`02-mvp-components/COMPONENT-INDEX.md`](02-mvp-components/COMPONENT-INDEX.md), docs hub README: Fair marked complete; Protocol V1 may begin at **P1**.
+### Notes
+- No program change in this release. Evidence: Changelog `0.10.0` / `0.11.0`, IMPL-10 / IMPL-11 reports, 102/102 suites.
+
 ## [0.11.0] - 2026-09-21 — component 11: Events / thin indexing (Fair)
 ### Added
 - `docs/03-api-interfaces/EVENT-CATALOG.md` — the 19 live events, fields, emitting instructions, decoding notes, stability rules; `apps/web/src/lib/events.ts` (`decodePermaEvents`, `fetchTxEvents`, `slicesTouchedBy`, `describeEvents`) wired into `useSendPermaTx` (event-directed refetch of market / premium index / touched ranges on top of the unchanged collateral + positions refetch; toast `detail` names the events); `tests/events.ts` (9, decodes every product-path + admin event from real logs); `apps/web/test/events.test.ts` (11).
