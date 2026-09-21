@@ -6,8 +6,8 @@
 |---|---|
 | **Status** | **Fair MVP release gate GREEN** |
 | **Components** | **01–11** shipped (10 pause/admin, 11 Fair-thin events) |
-| **Integration suite** | **102 passing / 0 failing**, forward and reversed, fresh localnet ledger |
-| **Unit** | `yarn test:unit` **66** green |
+| **Integration suite** | **114 passing / 0 failing**, forward and reversed, fresh localnet ledger |
+| **Unit** | `yarn test:unit` **67** green |
 | **Web** | typecheck / unit / copy / build / Playwright e2e green (as of Component 11 ship) |
 | **On-chain** | Program `4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt` on localnet; thin Trade / Portfolio / Vault UI |
 | **Evidence** | [`CHANGELOG.md`](../CHANGELOG.md) `0.10.0`–`0.11.0`; [`IMPL-10-PAUSE-ADMIN-REPORT.md`](../audits/IMPL-10-PAUSE-ADMIN-REPORT.md); [`IMPL-11-EVENTS-INDEXING-REPORT.md`](../audits/IMPL-11-EVENTS-INDEXING-REPORT.md); [`COMPONENT-INDEX.md`](../02-mvp-components/COMPONENT-INDEX.md) |
@@ -170,10 +170,12 @@ solana program deploy target/deploy/perma.so \
 npx ts-mocha -p ./tsconfig.json -t 1000000 \
   tests/adapter.ts tests/adapter-liquidity.ts tests/collateral.ts \
   tests/factory.ts tests/position-short.ts tests/position-long.ts \
-  tests/settle-premium.ts tests/risk-solvency.ts tests/pause-admin.ts tests/events.ts
+  tests/settle-premium.ts tests/risk-solvency.ts \
+  tests/admin-transfer.ts tests/range-unwind.ts \
+  tests/pause-admin.ts tests/events.ts
 ```
 
-Expected: **102 passing, 0 failing** (76 through component 09 + 17 in `tests/pause-admin.ts` + 9 in `tests/events.ts`). This covers gates **S1–S5** below. `pause-admin.ts` and `events.ts` go **last** in the forward list: both self-heal (unpause + restore risk defaults + burn what they opened) in their own `before()`/`after()`, so the reversed pass — where they run first — also stays clean.
+Expected: **114 passing, 0 failing** (76 through component 09 + 7 in `tests/admin-transfer.ts` + 5 in `tests/range-unwind.ts` + 17 in `tests/pause-admin.ts` + 9 in `tests/events.ts`). The two P1 suites (Protocol V1 — `transfer_admin`, `unwind_empty_range`) go before `pause-admin.ts`; they self-heal the same way, and `admin-transfer.ts` hands `GlobalConfig.admin` back to the provider wallet in an unconditional `after()`. This covers gates **S1–S5** below. `pause-admin.ts` and `events.ts` go **last** in the forward list: both self-heal (unpause + restore risk defaults + burn what they opened) in their own `before()`/`after()`, so the reversed pass — where they run first — also stays clean.
 
 > `tests/factory-rewards.ts` is **excluded on purpose** and needs its own `--reset`
 > ledger: it allowlists a different pool, so running it alongside makes every other
@@ -214,7 +216,7 @@ Vectors are defined in [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) and 
 yarn test:unit          # = cargo test -p perma --lib
 ```
 
-Expected: **60 passing** (as of component 09). The vector tests by name:
+Expected: **67 passing** (66 as of component 11, plus `validate_new_admin`'s `rejects_default_pubkey_as_new_admin` from P1). The vector tests by name:
 
 | Test | Covers | Needs the pool? |
 |---|---|---|
@@ -298,7 +300,7 @@ Sign off only with a real artifact per row — a transaction signature, or the t
 | E2 | UI shows live P&L and accrued premium matching on-chain state | §6 |
 | Q1 | The banner `Prototype. Not audited. Single pool. Not production mainnet risk capital.` is visible on **every** page, verbatim and non-dismissible | [`COPY-DECK.md`](../04-ui-ux/COPY-DECK.md) §1 |
 | Q2 | All screens pass the anti-slop review, including the banned-phrase list | [`UI-QA-CHECKLIST.md`](../04-ui-ux/UI-QA-CHECKLIST.md), `COPY-DECK.md` §5 |
-| Q3 | `yarn test:unit` green (66), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
+| Q3 | `yarn test:unit` green (67), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
 
 **The gate passes only when every row above passes.** A partial pass is a FAIL.
 

@@ -1,11 +1,17 @@
 // Reconcile, from outside the program, over RPC:
 //   1. range_vault.amount == premium_pool + dust, for EVERY range
 //   2. vault + Σ in_orca == Σ(free + locked), per side
+//
+// With `--monitor` (P1), first print the ops surface the RUNBOOK checklist asks
+// for: admin custody, pause state, risk params, and recent admin events. That
+// block is advisory - it never changes the exit code, which stays purely the
+// two accounting identities.
 import anchor from "@coral-xyz/anchor";
 import BN from "bn.js";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import { readFileSync } from "fs";
-const { AnchorProvider, Program, Wallet, web3 } = anchor;
+const { AnchorProvider, EventParser, Program, Wallet, web3 } = anchor;
+const MONITOR = process.argv.includes("--monitor");
 const POOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
 const VA = new PublicKey("3umaZKmQYDM2xbduPAa6LQWwj7Ngh4X6ZTRoNCfzNDdY");
 const VB = new PublicKey("HNR1XRJoG6gLPDfk5Hwz8p5S7PTihFZkvHrsdxGWaYWR");
@@ -17,6 +23,54 @@ const program = new Program(JSON.parse(readFileSync("target/idl/perma.json", "ut
 const market = PublicKey.findProgramAddressSync([Buffer.from("market"), POOL.toBuffer()], program.programId)[0];
 const amt = async (pk) => { const i = await conn.getAccountInfo(pk); return i ? i.data.readBigUInt64LE(64) : 0n; };
 const i32 = (v) => new BN(v).toTwos(32).toArrayLike(Buffer, "le", 4);
+
+if (MONITOR) {
+  const configPk = PublicKey.findProgramAddressSync([Buffer.from("global_config")], program.programId)[0];
+  const cfg = await program.account.globalConfig.fetch(configPk);
+  const m = await program.account.market.fetch(market);
+  console.log("=== MONITOR ===");
+  console.log(`global_config:        ${configPk.toBase58()}`);
+  console.log(`  admin:              ${cfg.admin.toBase58()}`);
+  console.log(`  allowlisted pool:   ${cfg.allowlistedWhirlpool.toBase58()}`);
+  console.log(`market:               ${market.toBase58()}`);
+  console.log(`  is_paused:          ${m.isPaused}`);
+  console.log(`  premium_rate:       ${m.premiumRate}`);
+  console.log(`  premium_multiplier: ${m.premiumMultiplier}`);
+  console.log(`  long_margin_horizon_slots: ${m.longMarginHorizonSlots}`);
+  console.log(`  long_margin_buffer_usdc:   ${m.longMarginBufferUsdc}`);
+
+  // Best-effort: an RPC that cannot serve history degrades to a warning. The
+  // checklist still works without it; the identities below are the real gate.
+  // camelCase: that is how Anchor's client reports event names, and how
+  // `tests/events.ts` asserts them.
+  const ADMIN_EVENTS = new Set([
+    "marketPauseSet", "marketPauseCleared", "marketRiskParamsSet",
+    "adminTransferred", "rangeUnwound",
+  ]);
+  try {
+    const parser = new EventParser(program.programId, program.coder);
+    const sigs = await conn.getSignaturesForAddress(program.programId, { limit: 50 }, "confirmed");
+    const hits = [];
+    for (const { signature } of sigs) {
+      const tx = await conn.getTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+      for (const ev of parser.parseLogs(tx?.meta?.logMessages ?? [], false)) {
+        if (!ADMIN_EVENTS.has(ev.name)) continue;
+        // Non-arrow: BN's own `toJSON` runs before the replacer and yields hex,
+        // so read the original value off the holder (`this`) instead of `v`.
+        const data = JSON.stringify(ev.data, function (k, v) {
+          const raw = this[k];
+          return raw?.toBase58 ? raw.toBase58() : BN.isBN(raw) ? raw.toString(10) : v;
+        });
+        hits.push(`  ${ev.name} ${signature.slice(0, 12)}… ${data}`);
+      }
+    }
+    console.log(`recent admin events (last ${sigs.length} signatures): ${hits.length}`);
+    for (const h of hits) console.log(h);
+  } catch (e) {
+    console.log(`  WARN: could not read program history (${e.message}); admin-event tail skipped`);
+  }
+  console.log("");
+}
 
 let bad = 0;
 const ranges = await program.account.rangePremiumState.all([{ memcmp: { offset: 8, bytes: market.toBase58() } }]);

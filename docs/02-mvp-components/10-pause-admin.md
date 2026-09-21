@@ -76,7 +76,7 @@ require!(!market.is_paused, PermaError::MarketPaused);
 - **`InvalidRiskParams`** (6034): the candidate risk parameters fail the overflow / zero checks. Nothing is written.
 
 ## Security Notes
-- **Admin Key Custody**: the admin key is a single point of failure. Squads/multisig is post-MVP (out of this component's scope); the on-chain check is a plain `require_keys_eq!` against `GlobalConfig.admin`.
+- **Admin Key Custody**: the on-chain check is a plain `require_keys_eq!` against `GlobalConfig.admin`, so custody is whatever that one pubkey is. Protocol V1 **P1** adds `transfer_admin`, which writes that field in place and lets the admin become a Squads vault — PERMA still contains no multisig CPI, the vault is simply the key that has to sign. Until a transfer is actually performed on a cluster, the admin is a single EOA and a single point of failure. Procedure: [`RUNBOOK-DEVNET.md`](../07-ops-presentation/RUNBOOK-DEVNET.md) §Admin custody; drill: `tests/admin-transfer.ts`.
 - **Transparency**: every real transition emits an event (below). No-op calls emit nothing, by design.
 
 ## Test Cases (`tests/pause-admin.ts`, 17 cases, all green in the release gate)
@@ -105,4 +105,4 @@ require!(!market.is_paused, PermaError::MarketPaused);
 - [x] `set_market_risk_params` with ADR-0003 overflow re-validation.
 - [x] `tests/pause-admin.ts` in the release gate; UI Deposit form no longer allows-while-paused.
 - [ ] `pause_global` — deferred (no `GlobalConfig` resize in Fair MVP).
-- [ ] Multisig admin — post-MVP.
+- [x] Multisig admin — **mechanism** shipped in P1 (`transfer_admin` + `yarn transfer-admin`, `tests/admin-transfer.ts`). Still open as an *ops* action: no live vault holds `GlobalConfig.admin` yet.

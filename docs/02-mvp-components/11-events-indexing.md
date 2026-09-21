@@ -44,7 +44,7 @@ await Promise.all([
 
 ## Invariants
 - **Polling is the source of truth.** No hook stops polling; no component needs an event to render; a consumer failure is invisible except for a missing toast line.
-- **Events are complete and truthful.** Every one of the 17 instructions emits on its success path; a failed instruction emits nothing; `PremiumSettled` is emitted only with a matching token movement; idempotent pause/unpause emit nothing.
+- **Events are complete and truthful.** Every one of the 19 instructions emits on its success path (17 at component 11, plus P1's `transfer_admin` and `unwind_empty_range`); a failed instruction emits nothing; `PremiumSettled` is emitted only with a matching token movement; idempotent pause/unpause emit nothing.
 - **Stability.** No renames, no field reorders/removals, additive only (catalog §5).
 
 ## Failure Modes & Errors

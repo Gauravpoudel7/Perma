@@ -16,6 +16,8 @@
 
 ### 4. Access Control
 - **Admin Authority**: All `GlobalConfig` and `Market` updates must be signed by the admin.
+- **Admin Transferability** (P1): `transfer_admin` moves `GlobalConfig.admin` to another pubkey — in practice a Squads vault, so the authority becomes a multisig without PERMA taking a CPI dependency on one. `Pubkey::default()` is rejected; a transfer to any other wrong key is unrecoverable, so the runbook requires verifying the vault before the handoff.
+- **Admin Reach**: the admin can pause, set ADR-0003 risk parameters, transfer its own authority, and sweep the premium residue of a fully-empty range (`unwind_empty_range`). It cannot move `Market.vault_a` / `vault_b`, any `UserCollateral` balance, or any position's `premium_receivable`. There is no admin withdrawal path for user funds.
 - **Owner Proof**: Position accounts must be signed by the `owner` pubkey.
 
 ## Audit Checklist (MVP)

@@ -28,9 +28,22 @@ pub fn validate_allowlist_entry(whirlpool: &Pubkey) -> Result<()> {
 }
 
 /// Only the recorded `GlobalConfig.admin` may call an admin instruction
-/// (`create_market`, `pause_market`, `unpause_market`, `set_market_risk_params`).
+/// (`create_market`, `pause_market`, `unpause_market`, `set_market_risk_params`,
+/// `transfer_admin`, `unwind_empty_range`).
 pub fn require_admin(config: &GlobalConfig, admin: &Pubkey) -> Result<()> {
     require_keys_eq!(*admin, config.admin, PermaError::Unauthorized);
+    Ok(())
+}
+
+/// A new admin must be a real pubkey.
+///
+/// The all-zero key has no private key, so transferring to it would leave a
+/// `GlobalConfig` nobody can ever sign for - pause, unpause and risk params
+/// would all be permanently unreachable. Same reasoning as
+/// [`validate_allowlist_entry`], and the reason the check lives here rather
+/// than inline: a pure function is unit-testable without a validator.
+pub fn validate_new_admin(new_admin: &Pubkey) -> Result<()> {
+    require_keys_neq!(*new_admin, Pubkey::default(), PermaError::InvalidAdmin);
     Ok(())
 }
 
@@ -92,6 +105,14 @@ mod tests {
         assert!(authorize_create_market(&cfg, &Pubkey::new_unique(), &pool).is_err());
         // Right admin, wrong pool.
         assert!(authorize_create_market(&cfg, &admin, &Pubkey::new_unique()).is_err());
+    }
+
+    #[test]
+    fn rejects_default_pubkey_as_new_admin() {
+        // Transferring to the zero key would brick every admin path at once,
+        // with no way back - the one transfer that must never succeed.
+        assert!(validate_new_admin(&Pubkey::default()).is_err());
+        assert!(validate_new_admin(&Pubkey::new_unique()).is_ok());
     }
 
     #[test]

@@ -211,6 +211,149 @@ pub mod perma {
         Ok(())
     }
 
+    /// Hand protocol admin to another key (P1). Current admin only.
+    ///
+    /// This is the whole multisig story on-chain: PERMA never learns what a
+    /// Squads vault *is*, it just checks `require_keys_eq!` against whatever
+    /// pubkey sits in `GlobalConfig.admin`. Pointing that at a vault retires
+    /// the single-EOA risk without making the circuit breaker depend on a
+    /// second program - a pause that needs a multisig CPI to work is not
+    /// hardening, it is one more thing that can be down during an incident.
+    ///
+    /// Writes the existing `admin` bytes in place: no realloc, no migration.
+    /// The allowlist stays setter-less, so this cannot repoint the protocol at
+    /// another pool. Idempotent: transferring to the current admin is a no-op
+    /// and emits nothing, exactly as `pause_market` is.
+    pub fn transfer_admin(ctx: Context<TransferAdmin>, new_admin: Pubkey) -> Result<()> {
+        factory::require_admin(&ctx.accounts.global_config, &ctx.accounts.admin.key())?;
+        factory::validate_new_admin(&new_admin)?;
+
+        let config = &mut ctx.accounts.global_config;
+        let old_admin = config.admin;
+        if old_admin == new_admin {
+            return Ok(());
+        }
+        config.admin = new_admin;
+        emit!(AdminTransferred {
+            global_config: config.key(),
+            old_admin,
+            new_admin,
+        });
+        Ok(())
+    }
+
+    /// Sweep the premium residue out of a fully unwound range and close it (P1).
+    /// Admin only.
+    ///
+    /// The gap this closes is real: floor-with-carry leaves a residue that
+    /// belongs to nobody, it accumulates inside `premium_pool` where it is
+    /// indistinguishable from unclaimed entitlement, and until now nothing
+    /// could move it (`ADR-0002` consequences, IMPL-08 residuals #2-#3). The
+    /// rule was already written - "swept to the protocol only when a range
+    /// fully unwinds, never credited to any party mid-life" - this implements
+    /// exactly that sentence and nothing wider.
+    ///
+    /// **Fails closed.** Every signal that the range is still alive is checked
+    /// before a single lamport moves. `receivable == 0` is the load-bearing
+    /// one: a `PENDING_PREMIUM` short has already left `total_short_liquidity`
+    /// but is still owed cash, and sweeping past it would forfeit a claim the
+    /// protocol promised never to expire (`08-burn-settle.md` invariant 8).
+    ///
+    /// Moves **unattributable residue only** - never `Market.vault_a/b`, never
+    /// a user's free or locked collateral, never a position's
+    /// `premium_receivable`. That is why it does not become "an admin path that
+    /// moves user funds".
+    pub fn unwind_empty_range(ctx: Context<UnwindEmptyRange>) -> Result<()> {
+        factory::require_admin(&ctx.accounts.global_config, &ctx.accounts.admin.key())?;
+
+        let market_key = ctx.accounts.market.key();
+        let range = &ctx.accounts.range_state;
+        require_keys_eq!(range.market, market_key, PermaError::RangeStateMismatch);
+
+        // Alive in any sense at all -> refuse. Cheapest checks first.
+        require!(
+            range.total_short_liquidity == 0
+                && range.total_long_liquidity == 0
+                && range.receivable == 0,
+            PermaError::RangeNotEmpty
+        );
+
+        let (tick_lower, tick_upper) = (range.tick_lower, range.tick_upper);
+        let lower = tick_lower.to_le_bytes();
+        let upper = tick_upper.to_le_bytes();
+        let (expected_vault, _) = Pubkey::find_program_address(
+            &[
+                seeds::RANGE_VAULT,
+                market_key.as_ref(),
+                &lower,
+                &upper,
+            ],
+            ctx.program_id,
+        );
+        let range_vault = ctx.accounts.range_vault.to_account_info();
+        require_keys_eq!(
+            range_vault.key(),
+            expected_vault,
+            PermaError::RangeStateMismatch
+        );
+
+        let token_mint_b = ctx.accounts.market.token_mint_b;
+        let market_authority = ctx.accounts.market_authority.key();
+        check_user_ata(&range_vault, &token_mint_b, &market_authority)?;
+        // Destination is constrained to the *signing* admin's own USDC account.
+        // That is the whole of the destination policy: no protocol fee PDA, and
+        // no way to redirect the sweep to a third party.
+        let destination = ctx.accounts.destination.to_account_info();
+        check_user_ata(&destination, &token_mint_b, &ctx.accounts.admin.key())?;
+
+        // Assert the shipped identity on the way out rather than trusting the
+        // books: if the vault and the ledger ever disagreed, the sweep is the
+        // last moment anyone would notice.
+        let on_chain = token_amount(&range_vault)?;
+        let books = range
+            .premium_pool
+            .checked_add(range.dust)
+            .ok_or(PermaError::MathOverflow)?;
+        require!(on_chain == books, PermaError::RangeStateMismatch);
+
+        let auth_bump = [ctx.accounts.market.authority_bump];
+        let signer: &[&[u8]] = &[seeds::MARKET_AUTHORITY, market_key.as_ref(), &auth_bump];
+        let token_program = ctx.accounts.token_program.to_account_info();
+        let authority = ctx.accounts.market_authority.to_account_info();
+
+        if on_chain > 0 {
+            spl_transfer(
+                &token_program,
+                &range_vault,
+                &destination,
+                &authority,
+                on_chain,
+                Some(&[signer]),
+            )?;
+        }
+        close_token_account(
+            &token_program,
+            &range_vault,
+            &ctx.accounts.admin.to_account_info(),
+            &authority,
+            &[signer],
+        )?;
+
+        let range = &mut ctx.accounts.range_state;
+        range.premium_pool = 0;
+        range.dust = 0;
+
+        emit!(RangeUnwound {
+            market: market_key,
+            admin: ctx.accounts.admin.key(),
+            tick_lower,
+            tick_upper,
+            amount_usdc: on_chain,
+        });
+        // `range_state` itself is closed by Anchor's `close = admin`.
+        Ok(())
+    }
+
     /// Validate a prospective short range without touching Orca.
     ///
     /// Runs the full section C.8 preamble and reports the derived TickArrays, so
@@ -1246,6 +1389,41 @@ fn spl_transfer<'info>(
         Some(seeds) => anchor_lang::solana_program::program::invoke_signed(&ix, &infos, seeds)?,
         None => anchor_lang::solana_program::program::invoke(&ix, &infos)?,
     }
+    Ok(())
+}
+
+/// Hand-built SPL `CloseAccount` (instruction tag `9`).
+///
+/// Same reason as [`spl_transfer`]: `anchor-spl` stays out of the dependency
+/// graph (ADR-0001). SPL Token refuses to close an account with a non-zero
+/// balance, so this is only ever reachable after the sweep emptied it -
+/// a second, program-external guard on the same invariant.
+fn close_token_account<'info>(
+    token_program: &AccountInfo<'info>,
+    account: &AccountInfo<'info>,
+    lamport_destination: &AccountInfo<'info>,
+    authority: &AccountInfo<'info>,
+    signer_seeds: &[&[&[u8]]],
+) -> Result<()> {
+    let ix = anchor_lang::solana_program::instruction::Instruction {
+        program_id: token_program.key(),
+        accounts: vec![
+            AccountMeta::new(account.key(), false),
+            AccountMeta::new(lamport_destination.key(), false),
+            AccountMeta::new_readonly(authority.key(), true),
+        ],
+        data: vec![9u8], // SPL Token: CloseAccount
+    };
+    anchor_lang::solana_program::program::invoke_signed(
+        &ix,
+        &[
+            account.clone(),
+            lamport_destination.clone(),
+            authority.clone(),
+            token_program.clone(),
+        ],
+        signer_seeds,
+    )?;
     Ok(())
 }
 
@@ -2548,6 +2726,63 @@ pub struct SetMarketRiskParams<'info> {
     pub market: Account<'info, Market>,
 }
 
+/// `transfer_admin` (P1). Writes the existing `GlobalConfig.admin` bytes -
+/// no payer, no `system_program`, no realloc.
+#[derive(Accounts)]
+pub struct TransferAdmin<'info> {
+    /// Must equal `global_config.admin`; checked in the handler.
+    pub admin: Signer<'info>,
+
+    #[account(mut, seeds = [seeds::GLOBAL_CONFIG], bump = global_config.bump)]
+    pub global_config: Account<'info, GlobalConfig>,
+}
+
+/// `unwind_empty_range` (P1). Closes both range accounts; rent to the admin,
+/// which is the "rent to the closer" rule `08-burn-settle.md` specified.
+#[derive(Accounts)]
+pub struct UnwindEmptyRange<'info> {
+    /// Must equal `global_config.admin`; checked in the handler. `mut` because
+    /// it receives the rent from both closed accounts.
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    #[account(seeds = [seeds::GLOBAL_CONFIG], bump = global_config.bump)]
+    pub global_config: Account<'info, GlobalConfig>,
+
+    #[account(seeds = [seeds::MARKET, market.whirlpool.as_ref()], bump = market.bump)]
+    pub market: Account<'info, Market>,
+
+    /// CHECK: PDA that owns `range_vault` and signs the sweep. Never holds data.
+    #[account(seeds = [seeds::MARKET_AUTHORITY, market.key().as_ref()], bump = market.authority_bump)]
+    pub market_authority: UncheckedAccount<'info>,
+
+    /// Seeded from its own recorded ticks, so the caller cannot point the
+    /// instruction at one range's books while passing another's vault.
+    #[account(
+        mut,
+        close = admin,
+        seeds = [seeds::RANGE, market.key().as_ref(), &range_state.tick_lower.to_le_bytes(), &range_state.tick_upper.to_le_bytes()],
+        bump = range_state.bump
+    )]
+    pub range_state: Account<'info, RangePremiumState>,
+
+    /// CHECK: the PERMA PDA `["range_vault", market, lower_le, upper_le]`;
+    /// re-derived, key-checked, and mint/owner-checked in the handler, as
+    /// every other `range_vault` site does. `UncheckedAccount` because
+    /// `anchor-spl` is deliberately absent (ADR-0001).
+    #[account(mut)]
+    pub range_vault: UncheckedAccount<'info>,
+
+    /// CHECK: USDC token account owned by the signing `admin`; asserted with
+    /// `check_user_ata` in the handler. Constraining the owner to the signer is
+    /// the entire destination policy - see `IMPL-P1-FEASIBILITY.md` Q3a.
+    #[account(mut)]
+    pub destination: UncheckedAccount<'info>,
+
+    /// CHECK: pinned by the token accounts it is asked to operate on.
+    pub token_program: UncheckedAccount<'info>,
+}
+
 #[derive(Accounts)]
 pub struct ValidateShortRange<'info> {
     #[account(seeds = [seeds::MARKET, market.whirlpool.as_ref()], bump = market.bump)]
@@ -3011,4 +3246,27 @@ pub struct LiquidityRemoved {
     pub amount_a: u64,
     pub amount_b: u64,
     pub closed: bool,
+}
+
+// --- P1 production hardening (appended; never reorder what is above) ---
+
+/// Protocol admin handed to another key. Emitted only on a real change, so a
+/// retried ops script does not produce a phantom handoff in the log.
+#[event]
+pub struct AdminTransferred {
+    pub global_config: Pubkey,
+    pub old_admin: Pubkey,
+    pub new_admin: Pubkey,
+}
+
+/// A fully unwound range was swept and closed. `amount_usdc` is the residue
+/// that left the protocol's escrow - the only path by which the protocol ever
+/// receives premium (ADR-0002).
+#[event]
+pub struct RangeUnwound {
+    pub market: Pubkey,
+    pub admin: Pubkey,
+    pub tick_lower: i32,
+    pub tick_upper: i32,
+    pub amount_usdc: u64,
 }

@@ -228,3 +228,59 @@ what settling once would, asserted to the µUSDC in `tests/settle-premium.ts`.
   `risk::calculate_pnl`, which does not exist and cannot be invented without the
   valuation component 09 still has not defined. **P&L is 0 on every burn path**
   and the spec is marked deferred rather than silently skipped.
+
+---
+
+## Addendum — 2026-09-21: the residue leaves, but only when a range is empty (P1)
+
+### Context
+
+The original decision reserved a sweep: when a range fully unwinds, the residue
+left by the floored Q64.64 split transfers out and both accounts close, rent to
+the closer, and that is "the only path by which the protocol receives any
+premium". Nothing implemented it, so every range that emptied left a few µUSDC
+and two rent-paying accounts behind for good. Protocol V1 P1 closes that.
+
+### Decision
+
+**`unwind_empty_range` (admin-only, no parameters) implements exactly the
+reserved sweep, and nothing beyond it.** The ticks come from `range_state`
+itself, so a caller cannot aim the instruction at one range's books while
+passing another's vault.
+
+- **"Empty" means all three of** `total_short_liquidity == 0`,
+  `total_long_liquidity == 0`, **and** `receivable == 0`, else `RangeNotEmpty`.
+  The third is the one that matters: a `PENDING_PREMIUM` short has already left
+  `total_short_liquidity` but is still owed cash, and `RangePremiumState
+  .receivable` is the range-wide mirror of those claims. Without that check the
+  sweep would take money a short is entitled to — the one thing this ADR's
+  "no claim expiry" invariant forbids.
+- **The identity is asserted on the way out.** The handler requires
+  `range_vault.amount == premium_pool + dust` before it transfers anything, so
+  the sweep re-proves the invariant rather than trusting the books it is about
+  to delete.
+- **Destination is an admin-owned USDC token account**, checked with the same
+  `check_user_ata(destination, token_mint_b, admin.key())` used everywhere else.
+  No protocol-fee PDA was introduced: a new PDA is a new custody question, and
+  the residue at MVP scale is single-digit µUSDC. Revisit behind an ADR if a
+  real fee ever accrues.
+- **`dust` is still never written mid-life.** Separating residue from unclaimed
+  entitlement on every settle is the O(n) work the accumulator exists to avoid.
+  The field stays declared and zero; the sweep zeroes both it and
+  `premium_pool` as it closes the account.
+
+### Consequences
+
+- **Positive**: an emptied range no longer strands rent or residue, and the
+  protocol's only premium inflow is now an actual, tested code path
+  (`tests/range-unwind.ts`) rather than a sentence in a spec.
+- **Neutral**: re-creation after a close needs no special handling.
+  `mint_position` re-creates `range_state` with `init_if_needed`, and
+  `poke_range` only accumulates while both liquidity sides are non-zero, so a
+  re-created range catches up exactly like a brand-new one. Asserted by a test.
+- **Negative**: the sweep is admin-discretionary. Nothing forces it to run, and
+  the residue's destination is an operator's key, not a governed account. That
+  is honest for a prototype with one market and one admin; it is not a fee
+  policy.
+- **Unchanged**: zero-sum while a range is live. The protocol still takes no cut
+  from any settle, burn or claim.

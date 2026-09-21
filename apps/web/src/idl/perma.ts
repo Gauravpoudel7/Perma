@@ -2312,6 +2312,75 @@ export type Perma = {
       "args": []
     },
     {
+      "name": "transferAdmin",
+      "docs": [
+        "Hand protocol admin to another key (P1). Current admin only.",
+        "",
+        "This is the whole multisig story on-chain: PERMA never learns what a",
+        "Squads vault *is*, it just checks `require_keys_eq!` against whatever",
+        "pubkey sits in `GlobalConfig.admin`. Pointing that at a vault retires",
+        "the single-EOA risk without making the circuit breaker depend on a",
+        "second program - a pause that needs a multisig CPI to work is not",
+        "hardening, it is one more thing that can be down during an incident.",
+        "",
+        "Writes the existing `admin` bytes in place: no realloc, no migration.",
+        "The allowlist stays setter-less, so this cannot repoint the protocol at",
+        "another pool. Idempotent: transferring to the current admin is a no-op",
+        "and emits nothing, exactly as `pause_market` is."
+      ],
+      "discriminator": [
+        42,
+        242,
+        66,
+        106,
+        228,
+        10,
+        111,
+        156
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Must equal `global_config.admin`; checked in the handler."
+          ],
+          "signer": true
+        },
+        {
+          "name": "globalConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "newAdmin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "unlockCollateral",
       "docs": [
         "Release reserved collateral back to free.",
@@ -2479,6 +2548,190 @@ export type Perma = {
               }
             ]
           }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "unwindEmptyRange",
+      "docs": [
+        "Sweep the premium residue out of a fully unwound range and close it (P1).",
+        "Admin only.",
+        "",
+        "The gap this closes is real: floor-with-carry leaves a residue that",
+        "belongs to nobody, it accumulates inside `premium_pool` where it is",
+        "indistinguishable from unclaimed entitlement, and until now nothing",
+        "could move it (`ADR-0002` consequences, IMPL-08 residuals #2-#3). The",
+        "rule was already written - \"swept to the protocol only when a range",
+        "fully unwinds, never credited to any party mid-life\" - this implements",
+        "exactly that sentence and nothing wider.",
+        "",
+        "**Fails closed.** Every signal that the range is still alive is checked",
+        "before a single lamport moves. `receivable == 0` is the load-bearing",
+        "one: a `PENDING_PREMIUM` short has already left `total_short_liquidity`",
+        "but is still owed cash, and sweeping past it would forfeit a claim the",
+        "protocol promised never to expire (`08-burn-settle.md` invariant 8).",
+        "",
+        "Moves **unattributable residue only** - never `Market.vault_a/b`, never",
+        "a user's free or locked collateral, never a position's",
+        "`premium_receivable`. That is why it does not become \"an admin path that",
+        "moves user funds\"."
+      ],
+      "discriminator": [
+        200,
+        150,
+        130,
+        112,
+        39,
+        214,
+        116,
+        81
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Must equal `global_config.admin`; checked in the handler. `mut` because",
+            "it receives the rent from both closed accounts."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "globalConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.whirlpool",
+                "account": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "marketAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "rangeState",
+          "docs": [
+            "Seeded from its own recorded ticks, so the caller cannot point the",
+            "instruction at one range's books while passing another's vault."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "rangeState.tickLower",
+                "account": "rangePremiumState"
+              },
+              {
+                "kind": "account",
+                "path": "rangeState.tickUpper",
+                "account": "rangePremiumState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "rangeVault",
+          "docs": [
+            "re-derived, key-checked, and mint/owner-checked in the handler, as",
+            "every other `range_vault` site does. `UncheckedAccount` because",
+            "`anchor-spl` is deliberately absent (ADR-0001)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "destination",
+          "docs": [
+            "`check_user_ata` in the handler. Constraining the owner to the signer is",
+            "the entire destination policy - see `IMPL-P1-FEASIBILITY.md` Q3a."
+          ],
+          "writable": true
+        },
+        {
+          "name": "tokenProgram"
         }
       ],
       "args": []
@@ -2826,6 +3079,19 @@ export type Perma = {
   ],
   "events": [
     {
+      "name": "adminTransferred",
+      "discriminator": [
+        255,
+        147,
+        182,
+        5,
+        199,
+        217,
+        38,
+        179
+      ]
+    },
+    {
       "name": "collateralDeposited",
       "discriminator": [
         244,
@@ -3031,6 +3297,19 @@ export type Perma = {
         80,
         211,
         69
+      ]
+    },
+    {
+      "name": "rangeUnwound",
+      "discriminator": [
+        233,
+        50,
+        109,
+        150,
+        85,
+        243,
+        164,
+        237
       ]
     },
     {
@@ -3248,9 +3527,43 @@ export type Perma = {
       "code": 6034,
       "name": "invalidRiskParams",
       "msg": "Risk parameters would overflow the margin bound"
+    },
+    {
+      "code": 6035,
+      "name": "invalidAdmin",
+      "msg": "New admin must be a real pubkey"
+    },
+    {
+      "code": 6036,
+      "name": "rangeNotEmpty",
+      "msg": "Range still has inventory or an unfunded premium claim"
     }
   ],
   "types": [
+    {
+      "name": "adminTransferred",
+      "docs": [
+        "Protocol admin handed to another key. Emitted only on a real change, so a",
+        "retried ops script does not produce a phantom handoff in the log."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "globalConfig",
+            "type": "pubkey"
+          },
+          {
+            "name": "oldAdmin",
+            "type": "pubkey"
+          },
+          {
+            "name": "newAdmin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
     {
       "name": "collateralDeposited",
       "type": {
@@ -4189,6 +4502,39 @@ export type Perma = {
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "rangeUnwound",
+      "docs": [
+        "A fully unwound range was swept and closed. `amount_usdc` is the residue",
+        "that left the protocol's escrow - the only path by which the protocol ever",
+        "receives premium (ADR-0002)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "tickLower",
+            "type": "i32"
+          },
+          {
+            "name": "tickUpper",
+            "type": "i32"
+          },
+          {
+            "name": "amountUsdc",
+            "type": "u64"
           }
         ]
       }

@@ -229,7 +229,7 @@ A short in `PendingPremium` has **already** withdrawn its Orca liquidity and set
 | **Long closes before shorts** | Long pays in full at burn; `premium_pool` holds the cash. Shorts claim whenever they like — no deadline, no expiry on a claim. |
 | **Long closes, no shorts left** | Cannot occur: `total_long ≤ total_short` is enforced at mint, so a short cannot exit below outstanding long liquidity. |
 | **Dust residue** | Stays in the vault inside `premium_pool`, indistinguishable from unclaimed entitlement. The `dust` field is **declared but never written** (see §Test Cases and the 08 report residual #2). Not claimable by any position. |
-| **Range fully unwinds** | **Not implemented.** No instruction closes a range or sweeps residue; there is no protocol fee account. When it exists, residue transfers out and `RangePremiumState` + `range_vault` close, rent to the closer — and that would be the only path by which the protocol receives any premium. |
+| **Range fully unwinds** | **Implemented in P1** as `unwind_empty_range` (admin-only). With `total_short_liquidity`, `total_long_liquidity` and `receivable` all zero, the residue transfers out to an admin-owned USDC account and `RangePremiumState` + `range_vault` close, rent to the closer — the only path by which the protocol receives any premium. There is still no protocol fee *account*: the destination is checked to be admin-owned, not a PDA. See the addendum below. |
 
 ---
 
@@ -277,8 +277,8 @@ Vectors referenced are in [`FIXTURES-AND-VECTORS.md`](../06-testing/FIXTURES-AND
 - [x] **V4 — late join.** Short B joins at slot 100 → A `174 999`, B `24 999`. Assert B earns nothing for period 1. *(component 06)*
 - [x] **V5 — short closes first.** Pool empty → `premium_receivable = 99 999`, status `PendingPremium`; long later settles; short claims and the account closes. *(unit test **and** `tests/settle-premium.ts` end-to-end)*
 - [x] **Long closes first.** Pool holds cash; two shorts claim in either order with identical totals.
-- [ ] **Dust accumulation.** *Partly.* `range_vault.amount == premium_pool + dust` is asserted after every settle path and reconciled over RPC — but `dust` is never written: the residue stays inside `premium_pool`, indistinguishable from unclaimed entitlement. Separating them needs the range-unwind path below.
-- [ ] **Range unwind.** Not implemented. No instruction closes a range or sweeps residue; both would move funds with no user to attribute them to, which is a governance question this MVP does not answer.
+- [ ] **Dust accumulation.** *Partly, unchanged by P1.* `range_vault.amount == premium_pool + dust` is asserted after every settle path and reconciled over RPC — but `dust` is still never written mid-life: the residue stays inside `premium_pool`, indistinguishable from unclaimed entitlement. Splitting it out per settle is the O(n) work the accumulator exists to avoid.
+- [x] **Range unwind.** `unwind_empty_range` (P1), tested by `tests/range-unwind.ts`: refuses a range that still holds inventory (`RangeNotEmpty`), refuses a non-admin (`Unauthorized`), sweeps exactly `premium_pool` to the admin's USDC account, closes both accounts, emits `RangeUnwound`, and the range can be re-created afterwards by a plain mint.
 - [x] **Ordering regression.** Poke *after* a weight change and assert the resulting split is wrong — guards invariant 5. *(component 06)*
 - [x] **Double-settle.** Two settles cost a long exactly what one would, asserted to the µUSDC; a long below the µUSDC floor returns `NothingToSettle`. *(A second settle in the literal same slot is not reachable from a test client — the slot advances between RPCs — so the stronger frequency-neutrality property is asserted instead.)*
 - [x] **Wrong range account.** `range_state` is seed-derived from the *position's* ticks and `range_vault` is derived in-handler → `RangeStateMismatch`. Enforced by construction rather than by a caller-supplied account.
@@ -290,7 +290,7 @@ Vectors referenced are in [`FIXTURES-AND-VECTORS.md`](../06-testing/FIXTURES-AND
 PremiumSettled  { market, owner, perma_position, leg_type, amount, still_owed, premium_pool, premium_owed_usdc }   // every settle path; `amount` is USDC that moved
 LongBurned      { market, owner, perma_position, size, premium_paid_usdc, total_long_liquidity, available_after }
 ShortBurned     { market, owner, perma_position, liquidity, unlocked_a, unlocked_b, returned_a, returned_b, premium_claimed, premium_receivable, status, open_positions }
-// RangeUnwound: not emitted — no range-unwind instruction exists (see §Test Cases).
+RangeUnwound    { market, admin, tick_lower, tick_upper, amount_usdc }                                            // P1 `unwind_empty_range`; `amount_usdc` is the swept residue
 ```
 
 ## MVP Done Definition
@@ -302,6 +302,24 @@ ShortBurned     { market, owner, perma_position, liquidity, unlocked_a, unlocked
 - [x] `PendingPremium` status implemented, with rent refunded on final close.
 - [x] Vectors V2–V5 pass, plus the ordering regression test.
 - [x] Zero-sum and vault-conservation invariants asserted in tests, and reconciled from outside the program by `scripts/reconcile.mjs`.
+
+## Addendum — 2026-09-21: range unwind is implemented (P1)
+
+`unwind_empty_range` ships the sweep this document reserved. Admin-only, no
+parameters, and refuses any range where `total_short_liquidity`,
+`total_long_liquidity` or `receivable` is non-zero (`RangeNotEmpty`) — the
+`receivable` check is what keeps a `PendingPremium` short's claim safe. It
+re-asserts `range_vault.amount == premium_pool + dust` before transferring,
+sends the residue to an **admin-owned** USDC token account, closes
+`range_vault` and `RangePremiumState` with rent to the admin, and emits
+`RangeUnwound`. It moves no user funds: `Market.vault_a` / `vault_b`, every
+`UserCollateral` balance and every `premium_receivable` are untouched.
+
+`dust` remains **declared and never written mid-life** — unchanged by P1.
+Splitting residue out of `premium_pool` on every settle is the O(n) work the
+accumulator exists to avoid; the sweep simply zeroes both fields as it closes
+the account. Rationale and the destination decision: [ADR-0002](../adr/ADR-0002-premium-accounting.md)
+addendum 2026-09-21. Tests: `tests/range-unwind.ts`.
 
 ---
 

@@ -6,7 +6,9 @@
   "scripts": {
     "test:adapter": "anchor test --skip-local-validator -- --grep adapter",
     "test:unit": "cargo test -p perma --lib",
-    "lint": "cargo fmt --check && cargo clippy -- -D warnings"
+    "lint": "cargo fmt --check && cargo clippy -- -D warnings",
+    "reconcile": "node scripts/reconcile.mjs",
+    "monitor": "node scripts/reconcile.mjs --monitor"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

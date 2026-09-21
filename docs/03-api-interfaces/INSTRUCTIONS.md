@@ -1,6 +1,6 @@
 # INSTRUCTIONS: Program Interface
 
-The **17** public instructions of the PERMA program, as shipped through component 10. Names, parameters and account lists are the live ones (`programs/perma/src/lib.rs`); the working client patterns are in `tests/*.ts`. Sizes were measured on a local validator with `scripts/measure-position.mjs` (2026-09-20).
+The **19** public instructions of the PERMA program, as shipped through component 10 plus Protocol V1 **P1** (`transfer_admin`, `unwind_empty_range`). Names, parameters and account lists are the live ones (`programs/perma/src/lib.rs`); the working client patterns are in `tests/*.ts`. Sizes were measured on a local validator with `scripts/measure-position.mjs` (2026-09-20).
 
 `Market.is_paused` (written by `pause_market` / `unpause_market`, component 10) gates only the **risk-increasing** instructions: `mint_position`, `deposit_collateral`, `lock_collateral`, `adapter_open_position`, `adapter_add_liquidity` reject `MarketPaused`. Exit paths — `burn_position`, `settle_premium`, `withdraw_collateral`, `unlock_collateral`, `adapter_close_position`, `adapter_remove_liquidity` — and the read-only `validate_short_range` run while paused, subject to their own gates. Full matrix: [`10-pause-admin.md`](../02-mvp-components/10-pause-admin.md). Every instruction emits an Anchor event on success — see [`EVENT-CATALOG.md`](EVENT-CATALOG.md).
 
@@ -31,6 +31,25 @@ The **17** public instructions of the PERMA program, as shipped through componen
 - **Caller**: admin only, else `Unauthorized`. **Accounts**: as `pause_market`.
 - **Guard**: `risk::validate_risk_params` rejects `InvalidRiskParams` when `horizon == 0`, `buffer == 0`, or the margin at `risk::MARGIN_LIQUIDITY_BOUND` (2^52) — or its `MAX_OPEN_LONGS`-fold sum — would overflow `u64` under the current rate/multiplier (ADR-0003's "overflow at withdraw locks funds" requirement). Nothing is written on rejection.
 - **Emits**: `MarketRiskParamsSet { market, admin, long_margin_horizon_slots, long_margin_buffer_usdc }`. **Size**: 260 bytes.
+
+### `transfer_admin(new_admin: Pubkey)`
+- **Purpose**: hand `GlobalConfig.admin` to another key — in practice a Squads vault, so the protocol's admin authority becomes a multisig (P1). PERMA contains **no multisig CPI**: the vault is simply the pubkey that must sign.
+- **Caller**: **admin only** (`global_config.admin`), else `Unauthorized`.
+- **Accounts**: `admin` (Signer), `global_config` (Write, PDA `["global_config"]`). No payer, no `system_program`: the only write is the existing 32-byte `admin` field, in place.
+- **Params**: `new_admin`. `Pubkey::default()` is rejected with `InvalidAdmin` — a config nobody can sign for is a protocol with no operator.
+- **Idempotent**: transferring to the current admin returns `Ok(())` and emits nothing, so a retried ops script leaves no phantom handoff in the log.
+- **Emits**: `AdminTransferred { global_config, old_admin, new_admin }`.
+- **Ops**: `yarn transfer-admin <pubkey>` from `apps/web`; procedure in [`RUNBOOK-DEVNET.md`](../07-ops-presentation/RUNBOOK-DEVNET.md) §Admin custody.
+
+### `unwind_empty_range()`
+- **Purpose**: sweep the premium residue out of a range nobody is in any more, and close both of its accounts (P1; specified by [`08-burn-settle.md`](../02-mvp-components/08-burn-settle.md) §F and [ADR-0002](../adr/ADR-0002-premium-accounting.md)). The floored Q64.64 split leaves a µUSDC or two attributable to nobody; this is the only path by which the protocol ever receives premium.
+- **Caller**: **admin only**, else `Unauthorized`.
+- **Accounts**: `admin` (Signer, Write — receives the swept USDC's destination check and the rent from both closures), `global_config`, `market`, `market_authority`, `range_state` (Write, `close = admin`, PDA seeded from its own recorded ticks), `range_vault` (Write), `destination` (Write — a USDC token account **owned by the signing admin**, asserted by `check_user_ata`), `token_program`.
+- **Params**: none. The ticks come from `range_state`, so a caller cannot point the instruction at one range's books while passing another's vault.
+- **Guards**, all fail-closed and all before any transfer: `range_state.market` matches; `total_short_liquidity == 0`, `total_long_liquidity == 0` and `receivable == 0` (else `RangeNotEmpty` — the last one matters most, because a `PendingPremium` short has left `total_short_liquidity` but is still owed cash); the `range_vault` PDA re-derives; both token accounts carry the right mint and owner; and `range_vault.amount == premium_pool + dust` (else `RangeStateMismatch`), asserting the shipped identity on the way out rather than trusting the books.
+- **Moves no user funds**: `Market.vault_a` / `vault_b`, every `UserCollateral` balance, and every `premium_receivable` are untouched.
+- **Re-creation is safe**: `mint_position` re-creates `range_state` with `init_if_needed`, and `poke_range` only accumulates while both liquidity sides are non-zero, so a re-created range behaves exactly like a brand-new one.
+- **Emits**: `RangeUnwound { market, admin, tick_lower, tick_upper, amount_usdc }`.
 
 ## 2. Collateral Management
 
@@ -94,7 +113,8 @@ Exercise the Orca CPI surface directly, without the position engine. **Refused w
 ## 5. Not instructions
 
 - **There is no standalone index poke.** `GlobalPremiumIndex` is a pure function of elapsed slots; `mint_position`, `burn_position` and `settle_premium` each refresh it before use, and a late refresh catches up exactly. An earlier draft listed a `poke_observations` instruction that also "updated pool observations" — **Orca Whirlpool has no observations**, and no such instruction exists.
-- **There is no `liquidate_account`**, no force-exercise, no range unwind, and no admin path that moves user funds.
+- **There is no `liquidate_account`** and no force-exercise.
+- **There is no admin path that moves user funds.** `unwind_empty_range` (P1, above) sweeps only the unattributable premium residue of a range that every position has already left; `Market.vault_a` / `vault_b` and every `UserCollateral` balance remain unreachable to the admin.
 
 ---
 

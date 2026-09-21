@@ -1,6 +1,6 @@
 # EVENT-CATALOG: On-chain events (Fair MVP)
 
-The **19** Anchor events the PERMA program emits, as shipped through component 11. Names, fields and emitting instructions are the live ones (`programs/perma/src/lib.rs`, `// --- events ---` block); the IDL (`target/idl/perma.json`, mirrored at `apps/web/src/idl/`) carries a discriminator and a `types` entry for each. Decoded and asserted end-to-end by `tests/events.ts`; consumed by `apps/web/src/lib/events.ts`.
+The **21** Anchor events the PERMA program emits, as shipped through component 11 plus Protocol V1 **P1** (`AdminTransferred`, `RangeUnwound`, appended last — nothing above them was renamed or reordered). Names, fields and emitting instructions are the live ones (`programs/perma/src/lib.rs`, `// --- events ---` block); the IDL (`target/idl/perma.json`, mirrored at `apps/web/src/idl/`) carries a discriminator and a `types` entry for each. Decoded and asserted end-to-end by `tests/events.ts`; consumed by `apps/web/src/lib/events.ts`.
 
 Anchor's TypeScript client reports names in **camelCase** (`shortMinted`); Rust and this table use the declared PascalCase.
 
@@ -28,6 +28,8 @@ Anchor's TypeScript client reports names in **camelCase** (`shortMinted`); Rust 
 | `MarketPauseSet` | `pause_market` — **only on a real transition** | `market, admin: Pubkey` | refetch market (badge → Paused) |
 | `MarketPauseCleared` | `unpause_market` — only on a real transition | `market, admin` | refetch market |
 | `MarketRiskParamsSet` | `set_market_risk_params` | `market, admin: Pubkey; long_margin_horizon_slots, long_margin_buffer_usdc: u64` | refetch market (solvency inputs changed) |
+| `AdminTransferred` | `transfer_admin` (P1) — **only on a real change**; a self-transfer emits nothing | `global_config, old_admin, new_admin: Pubkey` | refetch config (admin custody moved) |
+| `RangeUnwound` | `unwind_empty_range` (P1) | `market, admin: Pubkey; tick_lower, tick_upper: i32; amount_usdc: u64` | drop the range from any cached list — both its accounts are closed |
 
 ## 3. Adapter harness (not the product path)
 

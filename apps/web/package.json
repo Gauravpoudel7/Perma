@@ -18,7 +18,8 @@
     "verify-withdraw-and-burn": "tsx scripts/verify-withdraw-and-burn.ts",
     "pause-market": "tsx scripts/pause-market.ts pause",
     "unpause-market": "tsx scripts/pause-market.ts unpause",
-    "set-risk-params": "tsx scripts/pause-market.ts set-risk-params"
+    "set-risk-params": "tsx scripts/pause-market.ts set-risk-params",
+    "transfer-admin": "tsx scripts/pause-market.ts transfer-admin"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

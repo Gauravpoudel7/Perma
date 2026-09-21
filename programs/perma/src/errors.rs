@@ -172,4 +172,15 @@ pub enum PermaError {
     /// overflow `u64` and brick withdraws (ADR-0003 forward requirement).
     #[msg("Risk parameters would overflow the margin bound")]
     InvalidRiskParams,
+
+    // --- P1 production hardening (appended; on-chain codes 6035+) ---
+    /// `transfer_admin` was handed the all-zero pubkey, which no one can sign
+    /// for. Same silent-brick argument as `InvalidAllowlistEntry`: a config
+    /// whose admin can never sign is a protocol with no operator.
+    #[msg("New admin must be a real pubkey")]
+    InvalidAdmin,
+    /// `unwind_empty_range` refused: the range still has short or long
+    /// liquidity, or a short still has an unfunded premium claim against it.
+    #[msg("Range still has inventory or an unfunded premium claim")]
+    RangeNotEmpty,
 }
