@@ -42,6 +42,73 @@ NEXT_PUBLIC_PERMA_PROGRAM_ID=4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt
 NEXT_PUBLIC_WHIRLPOOL=2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G
 ```
 
+
+## Localnet wallet
+
+Orca's devUSDC has no local mint authority, so it **cannot be airdropped or minted** on a
+`solana-test-validator`. `scripts/make-fixtures.mjs` works around that by hand-crafting WSOL and
+devUSDC token accounts for one address — whatever `ANCHOR_WALLET` points at, default
+`~/.config/solana/id.json` — and injecting them with `--account`. Every other wallet has zero USDC on
+localnet, and a USDC deposit from one fails in simulation.
+
+Tell the app which address that is:
+
+```bash
+cd apps/web
+yarn sync-fixture-wallet     # writes NEXT_PUBLIC_LOCALNET_FUNDED_WALLET to .env.local
+```
+
+With that set, Vault warns before you sign if the connected wallet is not the funded one, and the
+Deposit button blocks a USDC amount (SOL-only deposits still work — those come from ordinary
+lamports).
+
+Then pick one of two ways to transact:
+
+1. **Connect the funded keypair in the browser.** On a localnet build the connect dialog offers
+   "Localnet CLI keypair (fixtures)". Load your `~/.config/solana/id.json` with the file picker; the
+   file is read in the browser, held in memory for that tab only, and never written to disk,
+   `localStorage`, or any network request. It is rejected if it is not the fixture-funded address.
+   **Local testing only — never load a mainnet key.** This adapter is compiled out of a devnet build.
+2. **Fund your own wallet instead.** Export that wallet's keypair to a file, then:
+
+   ```bash
+   ANCHOR_WALLET=/path/to/your-keypair.json node scripts/make-fixtures.mjs
+   # restart the validator so the new --account fixtures load
+   cd apps/web && yarn sync-fixture-wallet
+   ```
+
+
+## Solana-devnet
+
+Public Solana-devnet is the other way to run the app, with an ordinary browser wallet instead of a
+local validator and the CLI keypair. It needs PERMA deployed there first — see
+`docs/07-ops-presentation/RUNBOOK-DEVNET.md` for the current deployment status and the deploy +
+`yarn init-market` commands.
+
+Once it is deployed, put this in `apps/web/.env.local` (the block is also in `.env.example`):
+
+```
+NEXT_PUBLIC_CLUSTER=devnet
+NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com
+NEXT_PUBLIC_PERMA_PROGRAM_ID=4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt
+NEXT_PUBLIC_WHIRLPOOL=2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G
+```
+
+Leave `NEXT_PUBLIC_INDEXER_URL` and `NEXT_PUBLIC_LOCALNET_FUNDED_WALLET` unset. Without an indexer
+the chart pane shows its empty state, which is the honest result; the localnet funded-wallet check
+does not apply off localnet.
+
+Then, in the browser:
+
+1. Switch Phantom (or any Wallet Standard wallet) to **Devnet**. The Localnet CLI keypair entry is
+   compiled out of a devnet build, so the connect dialog lists only real wallets.
+2. Get SOL for fees: `solana airdrop 2 <your-pubkey> -u https://api.devnet.solana.com`, or Phantom's
+   own devnet faucet. Public airdrops are rate-limited; retry later if refused.
+3. Get **devUSDC**, mint `BRjpCHtyQLNCo8gqRUr8jtdAj5AjPYQaoqbvcZiHok1k`, by swapping a little SOL on
+   Orca's devnet app. This is Orca's own test token — **not** Circle USDC, which this pool does not
+   use. There is no faucet for it and it cannot be minted.
+4. Connect, then deposit SOL and devUSDC in Vault. Everything else behaves as on localnet.
+
 ## Resyncing the IDL
 
 `src/idl/{perma.json,perma.ts}` are committed copies of the Anchor-generated

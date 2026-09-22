@@ -8,10 +8,19 @@ import { EXPLORER_BASE, CLUSTER } from "./constants";
  * link, we just can't guarantee it resolves without that manual step.
  */
 export function explorerTxUrl(signature: string): string {
+  return explorerUrl("tx", signature);
+}
+
+/** Explorer link for an account (a position PDA, for instance). Same cluster caveat as above. */
+export function explorerAddressUrl(address: string): string {
+  return explorerUrl("address", address);
+}
+
+function explorerUrl(kind: "tx" | "address", id: string): string {
   if (CLUSTER === "devnet") {
-    return `${EXPLORER_BASE}/tx/${signature}?cluster=devnet`;
+    return `${EXPLORER_BASE}/${kind}/${id}?cluster=devnet`;
   }
-  return `${EXPLORER_BASE}/tx/${signature}?cluster=custom&customUrl=${encodeURIComponent(
+  return `${EXPLORER_BASE}/${kind}/${id}?cluster=custom&customUrl=${encodeURIComponent(
     process.env.NEXT_PUBLIC_RPC_URL ?? ""
   )}`;
 }

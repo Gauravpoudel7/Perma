@@ -3,7 +3,7 @@
 import { NumberInput } from "../primitives/NumberInput";
 import { InventoryEmptyState } from "./InventoryEmptyState";
 import { useTradeFormStore } from "../../store/useTradeFormStore";
-import { useRangeState } from "../../hooks/useRangeState";
+import { useRangeStateValue } from "../../hooks/useRangeState";
 
 /**
  * "Position Size", in raw Orca liquidity units (matching the on-chain
@@ -17,7 +17,7 @@ export function SizeInput() {
   const tickUpper = useTradeFormStore((s) => s.tickUpper);
   const sizeInput = useTradeFormStore((s) => s.sizeInput);
   const setSizeInput = useTradeFormStore((s) => s.setSizeInput);
-  const rangeState = useRangeState(tickLower, tickUpper);
+  const rangeState = useRangeStateValue(tickLower, tickUpper);
 
   if (side === "long") {
     const available = rangeState
@@ -27,15 +27,18 @@ export function SizeInput() {
     if (available <= 0n) {
       return (
         <div>
-          <label className="text-body-sm mb-2 block text-text-muted">Position Size</label>
+          <p className="text-body-sm mb-2 block text-text-muted">Position Size</p>
           <InventoryEmptyState />
         </div>
       );
     }
     return (
       <div>
-        <label className="text-body-sm mb-2 block text-text-muted">Position Size</label>
+        <label htmlFor="position-size" className="text-body-sm mb-2 block text-text-muted">
+          Position Size
+        </label>
         <NumberInput
+          id="position-size"
           placeholder="Liquidity units"
           value={sizeInput}
           onChange={(e) => setSizeInput(e.target.value.replace(/[^0-9]/g, ""))}
@@ -49,8 +52,11 @@ export function SizeInput() {
 
   return (
     <div>
-      <label className="text-body-sm mb-2 block text-text-muted">Position Size</label>
+      <label htmlFor="position-size" className="text-body-sm mb-2 block text-text-muted">
+        Position Size
+      </label>
       <NumberInput
+        id="position-size"
         placeholder="Liquidity units"
         value={sizeInput}
         onChange={(e) => setSizeInput(e.target.value.replace(/[^0-9]/g, ""))}

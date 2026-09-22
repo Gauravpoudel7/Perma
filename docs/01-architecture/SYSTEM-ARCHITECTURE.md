@@ -40,7 +40,7 @@ graph TD
 ## Key Architectural Decisions
 
 ### Why the Adapter Pattern?
-By using a `CLMM Adapter`, PERMA is not hard-coded to Orca. Moving to Raydium or a custom CLMM only requires a new adapter implementation, keeping the core `Position Engine` and `Risk Engine` logic unchanged.
+The `CLMM Adapter` isolates Whirlpool CPI details from the Position and Risk engines. **Protocol V1 charter (2026-09-21): Orca Whirlpools only.** The adapter pattern *could* allow another CLMM later, but **Raydium / non-Orca venues are explicitly out of V1** until a new charter ADR. V1 expansion is more allowlisted Orca pools, not a second DEX.
 
 ### Why the Index-Based Premium?
 Updating thousands of position accounts every slot is impossible on Solana. The `GlobalPremiumIndex` allows the protocol to track time-based accrual globally, calculating individual premium only when a position is accessed (Mint/Burn/Query).

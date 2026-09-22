@@ -49,3 +49,33 @@ describe("parseAnchorError", () => {
     expect(name).toBe("UserRejected");
   });
 });
+
+describe("localnet funding failures", () => {
+  // The real shape: the adapter throws "Unexpected error" with the useful
+  // failure nested on `.error`, exactly as Phantom reports a failed simulation.
+  const wrapped = (message: string, logs: string[] = []) => ({
+    name: "WalletSendTransactionError",
+    message: "Unexpected error",
+    error: { message, logs },
+  });
+
+  it.each([
+    ["insufficient funds", "Transfer: insufficient lamports 0, need 1000000"],
+    ["rent shortfall", "Transaction results in an account with insufficient funds for rent"],
+    ["missing token account", "Program log: Error: could not find account"],
+  ])("maps %s to the localnet fixture message", (_label, message) => {
+    const parsed = parseAnchorError(wrapped(message));
+    expect(parsed.name).toBe("WalletInsufficientFunds");
+    expect(parsed.message).toContain("Fixtures fund the CLI wallet only");
+  });
+
+  it("maps the SPL token program's own insufficient-funds code from logs", () => {
+    const parsed = parseAnchorError(
+      wrapped("Transaction simulation failed", [
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: custom program error: 0x1",
+      ])
+    );
+    expect(parsed.name).toBe("WalletInsufficientFunds");
+  });
+});

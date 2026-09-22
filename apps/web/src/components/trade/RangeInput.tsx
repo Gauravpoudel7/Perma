@@ -14,6 +14,17 @@ const DECIMALS_A = 9;
 const DECIMALS_B = 6;
 const MIN_TICK = -443636;
 const MAX_TICK = 443636;
+// Half-widths, in tick spacings, for the "around spot" presets. Plain
+// numbers, not "ATM"/"ITM": there is no strike and no moneyness in a range.
+const PRESET_SPACINGS = [8, 32, 128] as const;
+// The slider spans a window of ±512 spacings around spot (≈ ×2.3 / ÷2.3 in
+// price), widened to include the current range. The full Whirlpool tick
+// domain (±443636) made a 2000-tick range a single pixel wide.
+const WINDOW_SPACINGS = 512;
+
+function clampTick(t: number): number {
+  return Math.min(MAX_TICK, Math.max(MIN_TICK, t));
+}
 
 /**
  * COPY-DECK §4.1: "Price Range" label, tick-spacing snap helper text, and
@@ -31,6 +42,7 @@ export function RangeInput({
   const tickLower = useTradeFormStore((s) => s.tickLower);
   const tickUpper = useTradeFormStore((s) => s.tickUpper);
   const setRange = useTradeFormStore((s) => s.setRange);
+  const rangeSource = useTradeFormStore((s) => s.rangeSource);
   const market = useChainStore((s) => s.market);
   const spot = useChainStore((s) => s.spot);
   const [status, setStatus] = useState<TickArrayStatus | null>(null);
@@ -72,12 +84,44 @@ export function RangeInput({
 
   const needsRent = status && (!status.lowerExists || !status.upperExists);
 
+  const center = spot
+    ? Math.floor(spot.tickCurrentIndex / tickSpacing) * tickSpacing
+    : Math.floor((tickLower + tickUpper) / 2 / tickSpacing) * tickSpacing;
+  const sliderMin = clampTick(Math.min(tickLower, center - WINDOW_SPACINGS * tickSpacing));
+  const sliderMax = clampTick(Math.max(tickUpper, center + WINDOW_SPACINGS * tickSpacing));
+
+  // Snap the current pool tick to the spacing, then open ±n spacings around it.
+  function applyPreset(n: number) {
+    if (!spot) return;
+    const center = Math.floor(spot.tickCurrentIndex / tickSpacing) * tickSpacing;
+    setRange(clampTick(center - n * tickSpacing), clampTick(center + n * tickSpacing), "preset");
+  }
+
   return (
-    <div>
-      <label className="text-body-sm mb-2 block text-text-muted">Price Range</label>
+    <div role="group" aria-labelledby="price-range-label">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span id="price-range-label" className="text-body-sm block text-text-muted">
+          Price Range
+        </span>
+        {spot && (
+          <div className="flex items-center gap-1" role="group" aria-label="Around spot, in tick spacings">
+            <span className="text-caption text-text-muted">Around spot</span>
+            {PRESET_SPACINGS.map((n) => (
+              <button
+                key={n}
+                type="button"
+                className="transition-brand focus-ring text-mono-sm tabular-nums rounded-sm border border-border px-2 py-1 text-text-muted hover:border-text-primary hover:text-text-primary"
+                onClick={() => applyPreset(n)}
+              >
+                ±{n}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <RangeSlider
-        min={MIN_TICK}
-        max={MAX_TICK}
+        min={sliderMin}
+        max={sliderMax}
         step={tickSpacing}
         lower={tickLower}
         upper={tickUpper}
@@ -92,6 +136,9 @@ export function RangeInput({
         {tickToPrice(tickUpper, DECIMALS_A, DECIMALS_B).toFixed(2)} USDC/SOL (ticks {tickLower} to{" "}
         {tickUpper})
       </p>
+      {rangeSource === "inventory" && (
+        <p className="text-body-sm mt-1 text-text-muted">Selected range from inventory.</p>
+      )}
       {needsRent && (
         <div className="mt-3">
           <TickArrayRentNotice lamports={rentLamports} />

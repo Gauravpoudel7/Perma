@@ -55,14 +55,47 @@ export interface ParsedPermaError {
   message: string;
 }
 
+/** Walk WalletSendTransactionError.error / cause chains and collect logs + messages. */
+function flattenThrown(e: unknown): { messages: string[]; logs: string[] } {
+  const messages: string[] = [];
+  const logs: string[] = [];
+  let cur: unknown = e;
+  for (let depth = 0; depth < 6 && cur != null; depth++) {
+    if (typeof cur !== "object") {
+      messages.push(String(cur));
+      break;
+    }
+    const o = cur as {
+      message?: unknown;
+      logs?: unknown;
+      error?: unknown;
+      cause?: unknown;
+      name?: unknown;
+    };
+    if (Array.isArray(o.logs)) {
+      for (const line of o.logs) if (typeof line === "string") logs.push(line);
+    }
+    if (typeof o.message === "string" && o.message.trim()) messages.push(o.message);
+    else if (typeof o.name === "string" && o.name.trim()) messages.push(o.name);
+    cur = o.error ?? o.cause ?? null;
+  }
+  return { messages, logs };
+}
+
 /**
  * Extracts a `PermaError` name from a thrown transaction error, falling back
  * to a raw-message scan for errors Anchor's own parser can't decode (e.g. an
  * unmapped Orca error like `ClosePositionNotEmpty`/`LiquidityZero`, or a
  * wallet-adapter rejection before anything reached the chain).
+ *
+ * Message text does NOT include "Nothing was changed." — `useSendPermaTx`
+ * appends that once on the toast.
  */
 export function parseAnchorError(e: unknown): ParsedPermaError {
-  const logs: string[] = (e as { logs?: string[] })?.logs ?? [];
+  const flat = flattenThrown(e);
+  const logs = flat.logs.length
+    ? flat.logs
+    : ((e as { logs?: string[] })?.logs ?? []);
   const anchorErr = AnchorError.parse(logs);
   const name = anchorErr?.error.errorCode.code;
   const mapped = name ? PERMA_ERROR_COPY[name] : undefined;
@@ -70,10 +103,18 @@ export function parseAnchorError(e: unknown): ParsedPermaError {
     return { name, message: mapped };
   }
 
-  const raw = e instanceof Error ? e.message : String(e);
+  const raw = flat.messages.join(" | ") || (e instanceof Error ? e.message : String(e));
   for (const knownName of Object.keys(PERMA_ERROR_COPY)) {
     const knownMessage = PERMA_ERROR_COPY[knownName];
     if (knownMessage && raw.includes(knownName)) {
+      return { name: knownName, message: knownMessage };
+    }
+  }
+  // Scan program logs for known error names too (simulation failures).
+  const logBlob = logs.join("\n");
+  for (const knownName of Object.keys(PERMA_ERROR_COPY)) {
+    const knownMessage = PERMA_ERROR_COPY[knownName];
+    if (knownMessage && logBlob.includes(knownName)) {
       return { name: knownName, message: knownMessage };
     }
   }
@@ -82,5 +123,35 @@ export function parseAnchorError(e: unknown): ParsedPermaError {
     return { name: "UserRejected", message: "Transaction cancelled." };
   }
 
-  return { name: "UnknownError", message: "Unexpected error. Nothing was changed." };
+  // Every shape a "this wallet has no tokens" failure takes on localnet: the
+  // SPL token program's own error (0x1), a missing ATA, a rent-exempt shortfall,
+  // or the runtime's debit message — each seen nested inside
+  // WalletSendTransactionError's generic "Unexpected error".
+  const blob = `${raw}\n${logBlob}`;
+  if (
+    /insufficient (funds|lamports)/i.test(blob) ||
+    /insufficient funds for rent/i.test(blob) ||
+    /Attempt to debit an account but found no record of a prior credit/i.test(blob) ||
+    /custom program error: 0x1\b/.test(blob) ||
+    /could not find account/i.test(blob)
+  ) {
+    return {
+      name: "WalletInsufficientFunds",
+      message:
+        "Not enough SOL or USDC in this wallet on localnet. Fixtures fund the CLI wallet only — import that key or regenerate fixtures for this address.",
+    };
+  }
+  if (/Blockhash not found/i.test(raw) || /block height exceeded/i.test(raw)) {
+    return { name: "BlockhashExpired", message: "Network was slow; the transaction expired. Try again." };
+  }
+
+  // Wallet adapter often wraps the real failure as message "Unexpected error"
+  // with the useful text on `.error`. Prefer the deepest non-generic message.
+  const useful =
+    [...flat.messages].reverse().find((m) => m && !/^unexpected error$/i.test(m.trim())) ?? raw;
+  const hint = useful.replace(/\s+/g, " ").trim().slice(0, 160);
+  return {
+    name: "UnknownError",
+    message: hint && !/^unexpected error$/i.test(hint) ? hint : "Unexpected error",
+  };
 }

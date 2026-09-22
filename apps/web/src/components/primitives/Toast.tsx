@@ -1,6 +1,7 @@
 "use client";
 
 import { explorerTxUrl } from "../../lib/explorer";
+import { useToastStore } from "../../store/useToastStore";
 
 export type ToastVariant = "pending" | "success" | "error";
 
@@ -19,6 +20,7 @@ export interface ToastData {
  * COMPONENT-LIBRARY.md §5. No glassmorphism, no drop shadow.
  */
 export function Toast({ toast }: { toast: ToastData }) {
+  const dismiss = useToastStore((s) => s.dismiss);
   const borderColor =
     toast.variant === "error"
       ? "border-l-danger"
@@ -28,10 +30,20 @@ export function Toast({ toast }: { toast: ToastData }) {
 
   return (
     <div
-      role="status"
+      role={toast.variant === "error" ? "alert" : "status"}
       className={`transition-brand w-80 rounded-md border border-border ${borderColor} border-l-2 bg-surface p-4 text-body-sm text-text-primary shadow-none`}
     >
-      <p>{toast.message}</p>
+      <div className="flex items-start justify-between gap-3">
+        <p>{toast.message}</p>
+        <button
+          type="button"
+          aria-label="Dismiss notification"
+          onClick={() => dismiss(toast.id)}
+          className="transition-brand focus-ring text-caption -mr-1 -mt-1 shrink-0 rounded-sm px-2 py-1 text-text-muted hover:text-text-primary"
+        >
+          Dismiss
+        </button>
+      </div>
       {toast.detail && <p className="mt-1 text-mono-sm text-text-muted">{toast.detail}</p>}
       {toast.signature && (
         <a

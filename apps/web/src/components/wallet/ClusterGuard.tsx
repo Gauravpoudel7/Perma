@@ -50,7 +50,7 @@ export function ClusterGuard() {
 
   if (connectionStatus === "unreachable") {
     return (
-      <div className="border-b border-border bg-surface px-4 py-2 text-center">
+      <div role="alert" className="border-b border-border bg-surface px-4 py-2 text-center">
         <p className="text-body-sm text-danger">
           Can&rsquo;t reach the network. Displayed values may be stale.
         </p>
@@ -60,7 +60,7 @@ export function ClusterGuard() {
 
   if (mismatch) {
     return (
-      <div className="border-b border-border bg-surface px-4 py-2 text-center">
+      <div role="alert" className="border-b border-border bg-surface px-4 py-2 text-center">
         <p className="text-body-sm text-danger">
           PERMA runs on devnet. Switch your wallet&rsquo;s network to continue.
         </p>

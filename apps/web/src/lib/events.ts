@@ -132,6 +132,21 @@ export function slicesTouchedBy(events: readonly PermaEvent[]): TouchedSlices {
       case "marketRiskParamsSet":
         t.market = true;
         break;
+      // Protocol V1 (P1) appended these. Consumer-side support only — no event
+      // was renamed, reordered or removed to add them here.
+      case "rangeUnwound":
+        // Sweeps a drained range escrow back to the market vault.
+        t.market = true;
+        addRange(data);
+        break;
+      case "rangeValidated":
+        addRange(data);
+        break;
+      case "adminTransferred":
+      case "globalConfigInitialized":
+        // `GlobalConfig` is not mirrored in the store, so there is nothing to
+        // refetch. Listed explicitly so the name is handled, not forgotten.
+        break;
       case "positionOpened":
       case "positionClosed":
       case "liquidityAdded":

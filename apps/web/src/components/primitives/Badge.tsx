@@ -3,7 +3,7 @@ type BadgeTone = "neutral" | "warning" | "danger";
 export function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: BadgeTone }) {
   const tones: Record<BadgeTone, string> = {
     neutral: "border-border text-text-muted",
-    warning: "border-[#EF4444] text-danger",
+    warning: "border-danger text-danger",
     danger: "border-danger text-danger",
   };
   return (

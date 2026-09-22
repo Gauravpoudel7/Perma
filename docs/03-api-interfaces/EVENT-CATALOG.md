@@ -55,6 +55,21 @@ Anchor's TypeScript client reports names in **camelCase** (`shortMinted`); Rust 
 4. Idempotent admin calls (`pause_market` on a paused market, `unpause_market` on an unpaused one) return `Ok(())` and **emit nothing**. Absence of the event is the signal.
 5. `PremiumSettled` is emitted only when USDC actually moved — both emit sites sit behind `require!(> 0, NothingToSettle)`.
 
-## 6. Deferred to P2
+## 6. Shipped in P2
 
-History series, `GET /markets`, `/positions/{owner}/history`, `/premium/series`, `/liquidations`, `/health`, Postgres/Prisma, websockets and charts are specified in [`docs/09-post-mvp/INDEXER-AND-PRODUCT-UI.md`](../09-post-mvp/INDEXER-AND-PRODUCT-UI.md) and are **not** Fair scope. Fair's consumer is `apps/web/src/lib/events.ts` + `hooks/useSendPermaTx.ts`: decode the tx you just sent, refetch what it touched, keep polling as the source of truth.
+`GET /health`, `/markets`, `/markets/{id}`, `/positions/{owner}`, `/positions/{owner}/history`,
+`/collateral/{owner}`, `/premium/series` and `/liquidations` are implemented in
+[`indexer/`](../../indexer/README.md), specified in
+[`docs/09-post-mvp/INDEXER-AND-PRODUCT-UI.md`](../09-post-mvp/INDEXER-AND-PRODUCT-UI.md)
+and reported on in [`IMPL-P2-INDEXER-PRODUCT-UI-REPORT.md`](../audits/IMPL-P2-INDEXER-PRODUCT-UI-REPORT.md).
+The indexer decodes the events in this catalog with the same Anchor `EventParser`
+the web app uses, and stores them under the PascalCase names spelled here.
+
+Deliberately still absent: Postgres/Prisma, websockets, and `/liquidations` rows —
+liquidation is P4 work with no on-chain instruction yet, so the route exists and
+always answers `[]`.
+
+Fair's own consumer is unchanged: `apps/web/src/lib/events.ts` +
+`hooks/useSendPermaTx.ts` decode the transaction you just sent, refetch what it
+touched, and keep polling as the source of truth. The indexer is an additive
+cache on top of that, never a replacement for it.

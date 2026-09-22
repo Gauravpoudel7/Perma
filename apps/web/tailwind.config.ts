@@ -15,8 +15,10 @@ const config: Config = {
         "text-primary": "var(--color-text-primary)",
         "text-muted": "var(--color-text-muted)",
         accent: "var(--color-accent)",
+        "accent-hover": "var(--color-accent-hover)",
         success: "var(--color-success)",
         danger: "var(--color-danger)",
+        "danger-hover": "var(--color-danger-hover)",
         "solana-accent": "var(--color-solana-accent)",
       },
       fontFamily: {

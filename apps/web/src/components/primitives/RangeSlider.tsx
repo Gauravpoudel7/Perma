@@ -35,6 +35,7 @@ export function RangeSlider({
       />
       <input
         aria-label="Lower tick"
+        aria-valuetext={`tick ${lower}`}
         type="range"
         min={min}
         max={max}
@@ -48,6 +49,7 @@ export function RangeSlider({
       />
       <input
         aria-label="Upper tick"
+        aria-valuetext={`tick ${upper}`}
         type="range"
         min={min}
         max={max}
@@ -66,7 +68,7 @@ export function RangeSlider({
           width: 12px;
           height: 12px;
           border-radius: 9999px;
-          background: #ffffff;
+          background: var(--color-text-primary);
           cursor: pointer;
         }
         .range-thumb::-moz-range-thumb {
@@ -74,9 +76,20 @@ export function RangeSlider({
           width: 12px;
           height: 12px;
           border-radius: 9999px;
-          background: #ffffff;
+          background: var(--color-text-primary);
           border: none;
           cursor: pointer;
+        }
+        /* Thumb-sized handles where there is a thumb: coarse pointers and phone widths. */
+        @media (pointer: coarse), (max-width: 767px) {
+          .range-thumb::-webkit-slider-thumb {
+            width: 24px;
+            height: 24px;
+          }
+          .range-thumb::-moz-range-thumb {
+            width: 24px;
+            height: 24px;
+          }
         }
       `}</style>
     </div>

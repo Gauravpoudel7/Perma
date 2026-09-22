@@ -3,28 +3,28 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-/** WIREFRAMES.md Layout 1: Trade / Portfolio / Vault / Docs. */
+/** WIREFRAMES.md Layout 1: Trade / Portfolio / Vault / Docs, plus P2 Markets. */
 const ITEMS = [
+  { href: "/markets", label: "Markets" },
   { href: "/trade", label: "Trade" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/vault", label: "Vault" },
 ];
 
 /**
- * Collapses to an icon-rail below `md` purely via Tailwind breakpoints (no
- * JS/resize-listener state) so it never causes an SSR/hydration mismatch.
- * A fixed w-48 rail at 390px viewport width left too little room for the
- * main content and caused real horizontal page overflow — caught by
- * Playwright's mobile-viewport pass, not visible in a desktop-only review.
+ * Desktop / tablet primary navigation, `md` and up. Below `md` it is not
+ * rendered visibly at all — `MobileTabBar` takes over — purely via a
+ * Tailwind breakpoint (no JS/resize-listener state), so there is never an
+ * SSR/hydration mismatch and never two navigations on one screen.
  */
-export function Sidenav({ collapsed = false }: { collapsed?: boolean }) {
+export function Sidenav() {
   const pathname = usePathname();
   return (
     <nav
-      className={`flex flex-col gap-1 border-r border-border bg-bg p-2 md:p-4 ${
-        collapsed ? "w-16 items-center" : "w-14 items-center md:w-48 md:items-stretch"
-      }`}
+      className="hidden w-48 flex-col gap-1 border-r border-border bg-bg p-4 md:flex"
       aria-label="Primary"
+      data-testid="sidenav"
+      style={{ paddingBottom: "calc(var(--shell-banner-h) + 0.5rem)" }}
     >
       {ITEMS.map((item) => {
         const active = pathname?.startsWith(item.href);
@@ -32,17 +32,14 @@ export function Sidenav({ collapsed = false }: { collapsed?: boolean }) {
           <Link
             key={item.href}
             href={item.href}
-            title={item.label}
-            className={`transition-brand focus-ring rounded-md px-3 py-2 text-body-md ${
+            aria-current={active ? "page" : undefined}
+            className={`transition-brand focus-ring rounded-md border-l px-3 py-2 text-body-md ${
               active
-                ? "bg-surface text-text-primary"
-                : "text-text-muted hover:text-text-primary"
+                ? "border-text-primary bg-surface text-text-primary"
+                : "border-transparent text-text-muted hover:text-text-primary"
             }`}
           >
-            <span aria-hidden={!collapsed} className={collapsed ? "" : "md:hidden"}>
-              {item.label.slice(0, 1)}
-            </span>
-            <span className={collapsed ? "sr-only" : "hidden md:inline"}>{item.label}</span>
+            {item.label}
           </Link>
         );
       })}
@@ -50,13 +47,9 @@ export function Sidenav({ collapsed = false }: { collapsed?: boolean }) {
         href="https://github.com/Gauravpoudel7/Perma"
         target="_blank"
         rel="noreferrer"
-        title="Docs"
         className="transition-brand focus-ring mt-auto rounded-md px-3 py-2 text-body-sm text-text-muted hover:text-text-primary"
       >
-        <span aria-hidden={!collapsed} className={collapsed ? "" : "md:hidden"}>
-          D
-        </span>
-        <span className={collapsed ? "sr-only" : "hidden md:inline"}>Docs</span>
+        Docs
       </a>
     </nav>
   );

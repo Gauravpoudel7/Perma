@@ -98,8 +98,10 @@ All values are multiples of 4px; 8px increments above `space-4`. Never use an of
 
 ### Semantic Accents
 - **Accent**: `#FFFFFF` (White on black high-contrast).
+- **Accent Hover**: `#E5E5E5` (Primary button hover only).
 - **Success**: `#10B981` (Emerald - used sparingly for P&L positive).
 - **Danger**: `#EF4444` (Red - used for P&L negative and solvency warnings).
+- **Danger Hover**: `#DC2626` (Danger button hover only).
 - **Solana Accent**: `#14F195` (Mint - used ONLY for blockchain-specific markers, not as a primary brand color).
 
 ## UI Principles

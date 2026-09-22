@@ -40,6 +40,23 @@ export function requiredMargin(market: MarketRiskFields, liquidity: bigint): big
   return ceilDiv(raw, PREMIUM_SCALE) + market.longMarginBufferUsdc;
 }
 
+// 400ms/slot -> 9000 slots/hour. Display-only conversion of the per-slot
+// rate into a per-hour ESTIMATE; the chain accrues per slot, never per hour.
+const SLOTS_PER_HOUR = 9000n;
+
+/**
+ * COPY-DECK §4.1 "Est. premium per hour, at the current rate", in µUSDC:
+ * `rate × L × mult × 9000 / PREMIUM_SCALE`, rounded down (an estimate, not a
+ * gate — the gate is `requiredMargin`). Shared by the ticket preview and the
+ * review sheet so the two never disagree.
+ */
+export function estPremiumPerHour(
+  market: Pick<MarketRiskFields, "premiumRate" | "premiumMultiplier">,
+  liquidity: bigint
+): bigint {
+  return (market.premiumRate * liquidity * market.premiumMultiplier * SLOTS_PER_HOUR) / PREMIUM_SCALE;
+}
+
 export interface PremiumIndexFields {
   currentIndex: bigint;
   lastUpdateSlot: bigint;

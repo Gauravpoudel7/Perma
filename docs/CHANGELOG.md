@@ -1,6 +1,14 @@
 # CHANGELOG
 
+## [Unreleased] — product charter: Orca-only Protocol V1
+### Changed
+- Protocol V1 stays on **Orca Whirlpools only**; Raydium / non-Orca adapters deferred beyond V1 ([`09-post-mvp/CHARTER-ORCA-ONLY.md`](09-post-mvp/CHARTER-ORCA-ONLY.md)). Roadmap P6 = additional allowlisted Orca pools; P7 clarifies mainnet vs continuous devnet testing.
+
 All notable changes to this project will be documented in this file. Format follows [`08-living-docs/CHANGELOG-POLICY.md`](08-living-docs/CHANGELOG-POLICY.md).
+
+## [Unreleased] — V1 DoD ends at P6 (devnet); mainnet deferred
+### Changed
+- Protocol V1 “complete product” = **P1→P6 on localnet + Solana devnet** (Orca-only). Former P7 (firm audit + mainnet) is **post-V1 / deferred**, not a V1 ship gate. See [`09-post-mvp/ROADMAP.md`](09-post-mvp/ROADMAP.md), [`COMPLETE-PRODUCT-DEFINITION.md`](09-post-mvp/COMPLETE-PRODUCT-DEFINITION.md).
 
 ## [0.11.1] - 2026-09-21 — Fair MVP release gate CLOSED
 ### Added

@@ -6,9 +6,13 @@
   "scripts": {
     "test:adapter": "anchor test --skip-local-validator -- --grep adapter",
     "test:unit": "cargo test -p perma --lib",
+    "indexer:dev": "node --disable-warning=ExperimentalWarning indexer/src/server.ts",
+    "indexer:ingest": "node --disable-warning=ExperimentalWarning indexer/src/ingest.ts",
+    "indexer:test": "cd indexer && node --disable-warning=ExperimentalWarning --test",
     "lint": "cargo fmt --check && cargo clippy -- -D warnings",
     "reconcile": "node scripts/reconcile.mjs",
-    "monitor": "node scripts/reconcile.mjs --monitor"
+    "monitor": "node scripts/reconcile.mjs --monitor",
+    "init-market": "node scripts/init-devnet-market.mjs"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

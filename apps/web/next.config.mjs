@@ -1,3 +1,11 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const LOCALNET_WALLET_MODULE = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "src/components/wallet/LocalnetKeypairWallet.ts"
+);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -15,6 +23,18 @@ const nextConfig = {
     // Standard auto-detection covers every desktop browser extension), so
     // the module is aliased out rather than worked around with a version
     // pin that could drift back out of sync on the next `yarn upgrade`.
+    // The localnet CLI-keypair wallet adapter exists for local development
+    // only. On a devnet build its dynamic import already sits in a statically
+    // dead branch, but webpack would still emit the chunk; aliasing the module
+    // to `false` means its code is never built. Anything other than an
+    // explicit "devnet" keeps it (the dev default is localnet).
+    if (process.env.NEXT_PUBLIC_CLUSTER === "devnet") {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        [LOCALNET_WALLET_MODULE]: false,
+      };
+    }
+
     config.resolve.alias = {
       ...config.resolve.alias,
       "@solana-mobile/wallet-adapter-mobile": false,

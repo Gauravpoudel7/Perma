@@ -1,6 +1,8 @@
 # OFFCHAIN ARCHITECTURE: PERMA
 
-> **Aspirational — P2.** The indexer → PostgreSQL → API pipeline below is the post-MVP product stack ([`docs/09-post-mvp/INDEXER-AND-PRODUCT-UI.md`](../09-post-mvp/INDEXER-AND-PRODUCT-UI.md)). Fair MVP ships **no** off-chain service: the web app polls RPC and, after each transaction it sends, decodes that transaction's events to refetch what changed (`apps/web/src/lib/events.ts`; component 11, [`11-events-indexing.md`](../02-mvp-components/11-events-indexing.md)). The direct-RPC fallback rule in §UI Integration Strategy is the one part of this page that is live today.
+> **Partly shipped in P2.** A read-only indexer now exists at [`indexer/`](../../indexer/README.md): it ingests finalized PERMA transactions into **`node:sqlite`** (not PostgreSQL — see [`IMPL-P2-FEASIBILITY.md`](../audits/IMPL-P2-FEASIBILITY.md) §Q2 for the written override) and serves the eight public GET routes over `node:http`. There is no Prisma, no websocket push, and no message queue. The web app treats it as an untrusted cache: `usePolledAccount` remains the source of truth and every risk-increasing transaction still re-reads balances and open longs over RPC.
+>
+> **Original note — aspirational, P2.** The indexer → PostgreSQL → API pipeline below is the post-MVP product stack ([`docs/09-post-mvp/INDEXER-AND-PRODUCT-UI.md`](../09-post-mvp/INDEXER-AND-PRODUCT-UI.md)). Fair MVP ships **no** off-chain service: the web app polls RPC and, after each transaction it sends, decodes that transaction's events to refetch what changed (`apps/web/src/lib/events.ts`; component 11, [`11-events-indexing.md`](../02-mvp-components/11-events-indexing.md)). The direct-RPC fallback rule in §UI Integration Strategy is the one part of this page that is live today.
 
 ## System Topology
 The off-chain stack is designed for low latency and a premium user experience, moving away from "raw RPC" calls toward a cached, indexed state.

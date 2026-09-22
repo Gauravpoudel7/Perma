@@ -15,10 +15,20 @@ const POLL_MS = 15_000;
  * case, which callers read as `available = 0` (NoShortInventory territory).
  */
 export function useRangeState(tickLower: number, tickUpper: number) {
+  useRangeStatePoller(tickLower, tickUpper);
+  return useRangeStateValue(tickLower, tickUpper);
+}
+
+/** Read-only view of a range already polled elsewhere (the Trade desk mounts one poller in `TradePanel`). */
+export function useRangeStateValue(tickLower: number, tickUpper: number) {
+  return useChainStore((s) => selectRangeState(s, tickLower, tickUpper));
+}
+
+/** The 15s poll for one range, without a return value. Mount once per range on a screen. */
+export function useRangeStatePoller(tickLower: number, tickUpper: number) {
   const program = usePermaProgram();
   const marketPubkey = useChainStore((s) => s.marketPubkey);
   const setRangeState = useChainStore((s) => s.setRangeState);
-  const rangeState = useChainStore((s) => selectRangeState(s, tickLower, tickUpper));
 
   usePolledAccount(
     async () => {
@@ -30,6 +40,4 @@ export function useRangeState(tickLower: number, tickUpper: number) {
     POLL_MS,
     [program, marketPubkey?.toBase58(), tickLower, tickUpper]
   );
-
-  return rangeState;
 }

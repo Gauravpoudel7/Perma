@@ -9,9 +9,9 @@ import { useChainStore } from "../store/useChainStore";
 const POLL_MS = 10_000;
 
 /**
- * Whirlpool spot price — Trade screen ONLY (Portfolio/Vault never need
- * price). Labeled "Spot" always; there is no TWAP to show and none is
- * computed here. Polled every 10s.
+ * Whirlpool spot price, mounted once in AppShell for the TopBar ticker.
+ * Labeled "Spot" always; there is no TWAP to show and none is computed
+ * here. Polled every 10s. No transaction path reads it.
  */
 export function useSpotPrice() {
   const { connection } = useConnection();

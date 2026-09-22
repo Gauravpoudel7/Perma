@@ -1,6 +1,8 @@
 # Component: Events Indexing
 
-> **Status: IMPLEMENTED — Fair-thin.** Fair MVP ships (1) the complete on-chain event surface — 19 events, one per lifecycle action, frozen in [`EVENT-CATALOG.md`](../03-api-interfaces/EVENT-CATALOG.md); (2) a **minimal consumer** in the web app that decodes the events of the transaction it just confirmed and refetches only what they touched; (3) tests that decode every product-path event from real transaction logs. The database-backed listener, REST history APIs and websocket push this spec originally described are **P2** — see [`docs/09-post-mvp/INDEXER-AND-PRODUCT-UI.md`](../09-post-mvp/INDEXER-AND-PRODUCT-UI.md) — per [`MVP-SCOPE.md`](../00-overview/MVP-SCOPE.md) ("Advanced Indexing … out of scope; minimal RPC cache is OK") and [`ROADMAP.md`](../09-post-mvp/ROADMAP.md) P0 vs P2. Record: [`IMPL-11-FEASIBILITY.md`](../audits/IMPL-11-FEASIBILITY.md), [`IMPL-11-EVENTS-INDEXING-REPORT.md`](../audits/IMPL-11-EVENTS-INDEXING-REPORT.md).
+> **Status: IMPLEMENTED — Fair-thin, plus a P2 indexer.** The database-backed listener and REST history APIs that this spec originally described now exist in [`indexer/`](../../indexer/README.md) and are reported in [`IMPL-P2-INDEXER-PRODUCT-UI-REPORT.md`](../audits/IMPL-P2-INDEXER-PRODUCT-UI-REPORT.md). That service is **additive**: it is a read-only cache with no influence on any transaction the app sends, and everything described below as Fair behaviour is unchanged. Websocket push remains out of scope.
+>
+> **Original Fair-thin status.** Fair MVP ships (1) the complete on-chain event surface — 19 events, one per lifecycle action, frozen in [`EVENT-CATALOG.md`](../03-api-interfaces/EVENT-CATALOG.md); (2) a **minimal consumer** in the web app that decodes the events of the transaction it just confirmed and refetches only what they touched; (3) tests that decode every product-path event from real transaction logs. The database-backed listener, REST history APIs and websocket push this spec originally described are **P2** — see [`docs/09-post-mvp/INDEXER-AND-PRODUCT-UI.md`](../09-post-mvp/INDEXER-AND-PRODUCT-UI.md) — per [`MVP-SCOPE.md`](../00-overview/MVP-SCOPE.md) ("Advanced Indexing … out of scope; minimal RPC cache is OK") and [`ROADMAP.md`](../09-post-mvp/ROADMAP.md) P0 vs P2. Record: [`IMPL-11-FEASIBILITY.md`](../audits/IMPL-11-FEASIBILITY.md), [`IMPL-11-EVENTS-INDEXING-REPORT.md`](../audits/IMPL-11-EVENTS-INDEXING-REPORT.md).
 
 ## Purpose
 Give the off-chain UI an accurate view of protocol state without reading every PDA on every tick, and make the protocol *observable*: every state change is an Anchor event a third party can decode from transaction logs with nothing but the IDL.
@@ -26,7 +28,7 @@ No on-chain state. The consumer holds nothing durable: the Zustand `useChainStor
 
 Wired in `hooks/useSendPermaTx.ts`: `confirmTransaction` → `fetchTxEvents` → success toast (+ detail) → `Promise.all([refetchAll(), refetchTouched(events)])`.
 
-The REST endpoints (`GET /positions/{owner}`, `/market/{pool}`, `/user/{user}/collateral`, history and series) are **P2** and defined in `INDEXER-AND-PRODUCT-UI.md`.
+The REST endpoints (`GET /positions/{owner}`, `/markets`, `/collateral/{owner}`, history and series) shipped in P2 and live in [`indexer/src/routes.ts`](../../indexer/src/routes.ts). They are public reads over projections folded from **finalized** transactions only, and they never feed the pre-transaction checks: `apps/web` still re-reads balances and open longs over RPC before every risk-increasing instruction.
 
 ## Algorithms & Pseudocode (Fair consumer)
 ```ts
@@ -43,7 +45,7 @@ await Promise.all([
 ```
 
 ## Invariants
-- **Polling is the source of truth.** No hook stops polling; no component needs an event to render; a consumer failure is invisible except for a missing toast line.
+- **Polling is the source of truth.** No hook stops polling; no component needs an event to render; a consumer failure is invisible except for a missing toast line. The P2 indexer does not change this: with `NEXT_PUBLIC_INDEXER_URL` unset, or the service down, the app behaves exactly as it did in Fair.
 - **Events are complete and truthful.** Every one of the 19 instructions emits on its success path (17 at component 11, plus P1's `transfer_admin` and `unwind_empty_range`); a failed instruction emits nothing; `PremiumSettled` is emitted only with a matching token movement; idempotent pause/unpause emit nothing.
 - **Stability.** No renames, no field reorders/removals, additive only (catalog §5).
 

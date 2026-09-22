@@ -1,0 +1,12 @@
+{
+  "name": "@perma/indexer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PERMA P2 read-only event indexer. Prototype. Not audited. Single pool. Not production mainnet risk capital.",
+  "scripts": {
+    "dev": "node --disable-warning=ExperimentalWarning src/server.ts",
+    "ingest": "node --disable-warning=ExperimentalWarning src/ingest.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  }
+}

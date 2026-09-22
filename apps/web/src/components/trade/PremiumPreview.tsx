@@ -2,14 +2,10 @@
 
 import { useChainStore } from "../../store/useChainStore";
 import { useTradeFormStore } from "../../store/useTradeFormStore";
-import { formatBaseUnits, parseToBaseUnits } from "../../lib/format";
+import { formatBaseUnits } from "../../lib/format";
+import { estPremiumPerHour } from "../../lib/solvency";
 
 const DECIMALS_B = 6;
-const PREMIUM_SCALE = 1_000_000_000_000n;
-// 400ms/slot -> 9000 slots/hour. This is the same constant the on-chain
-// program's slot cadence assumes elsewhere in this codebase's docs; it is
-// only used here to convert a per-slot rate into a per-hour ESTIMATE.
-const SLOTS_PER_HOUR = 9000n;
 
 /** COPY-DECK §4.1: "Est. premium per hour, at the current rate." Long side only — a short earns, doesn't pay. */
 export function PremiumPreview() {
@@ -26,12 +22,13 @@ export function PremiumPreview() {
     return null;
   }
 
-  const perHourScaled =
-    BigInt(market.premiumRate.toString()) *
-    liquidity *
-    BigInt(market.premiumMultiplier.toString()) *
-    SLOTS_PER_HOUR;
-  const perHour = perHourScaled / PREMIUM_SCALE;
+  const perHour = estPremiumPerHour(
+    {
+      premiumRate: BigInt(market.premiumRate.toString()),
+      premiumMultiplier: BigInt(market.premiumMultiplier.toString()),
+    },
+    liquidity
+  );
 
   return (
     <p className="text-body-sm text-text-muted">

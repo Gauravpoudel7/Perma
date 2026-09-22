@@ -57,6 +57,8 @@ Fair MVP components **01–11** are shipped. The release gate is **GREEN** ([`RE
 
 **What Fair deliberately is not:** multi-leg, multi-pool, liquidation, force exercise, price-aware margin, P2 charts/indexer, mainnet risk capital.
 
+**Protocol V1 charter (2026-09-21):** stay on **Orca Whirlpools only** (additional allowlisted Orca pools in P6). **Raydium / other CLMMs are out of V1**. **V1 completes on localnet + Solana devnet** (through P6); **firm audit + mainnet are post-V1** — see [`docs/09-post-mvp/CHARTER-ORCA-ONLY.md`](../09-post-mvp/CHARTER-ORCA-ONLY.md) and [`ROADMAP.md`](../09-post-mvp/ROADMAP.md).
+
 ## After Fair
 
 Protocol V1 work starts at **P1** under [`docs/09-post-mvp/`](../09-post-mvp/). That folder does **not** expand Fair scope — the P2 indexer/product UI in particular is not Fair work. Do not reopen components 01–11 unless a critical bugfix is required.

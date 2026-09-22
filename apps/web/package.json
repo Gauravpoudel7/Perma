@@ -2,7 +2,7 @@
   "name": "@perma/web",
   "version": "0.1.0",
   "private": true,
-  "description": "PERMA Fair MVP web UI — Trade / Portfolio / Vault. Prototype. Not audited. Single pool. Not production mainnet risk capital.",
+  "description": "PERMA Fair MVP web UI \u2014 Trade / Portfolio / Vault. Prototype. Not audited. Single pool. Not production mainnet risk capital.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -19,7 +19,8 @@
     "pause-market": "tsx scripts/pause-market.ts pause",
     "unpause-market": "tsx scripts/pause-market.ts unpause",
     "set-risk-params": "tsx scripts/pause-market.ts set-risk-params",
-    "transfer-admin": "tsx scripts/pause-market.ts transfer-admin"
+    "transfer-admin": "tsx scripts/pause-market.ts transfer-admin",
+    "sync-fixture-wallet": "node scripts/sync-fixture-wallet.mjs"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
@@ -28,6 +29,7 @@
     "@solana/wallet-adapter-react": "^0.15.35",
     "@solana/web3.js": "^1.98.0",
     "bn.js": "^5.2.1",
+    "lightweight-charts": "^5.2.1",
     "next": "^14.2.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

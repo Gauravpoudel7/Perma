@@ -15,7 +15,7 @@ import { parseAnchorError } from "../lib/errors";
 import { premiumIndexPda, rangeStatePda } from "../lib/pda";
 import { describeEvents, fetchTxEvents, slicesTouchedBy, type PermaEvent } from "../lib/events";
 import { useChainStore } from "../store/useChainStore";
-import { useToastStore } from "../components/primitives/ToastContainer";
+import { useToastStore } from "../store/useToastStore";
 
 /**
  * The single choke point for every write transaction in this app.
@@ -92,7 +92,7 @@ export function useSendPermaTx() {
     async (
       ixs: TransactionInstruction[],
       opts: { successMessage: string; extraSigners?: Signer[] }
-    ): Promise<string> => {
+    ): Promise<string | null> => {
       if (!publicKey) throw new Error("Connect a wallet to continue.");
 
       const toastId = push({ variant: "pending", message: "Confirm in your wallet" });
@@ -116,14 +116,18 @@ export function useSendPermaTx() {
         await Promise.all([refetchAll(), refetchTouched(events)]);
         return signature;
       } catch (e) {
+        // Toast is the user-facing result. Do not rethrow — callers often
+        // await without catch, and Next.js turns the rejection into a full-screen
+        // "Unhandled Runtime Error" overlay (WalletSendTransactionError).
+        console.error("[useSendPermaTx]", e);
         const { message } = parseAnchorError(e);
         const signature = (e as { signature?: string })?.signature;
         update(toastId, {
           variant: "error",
-          message: `Transaction failed: ${message} Nothing was changed.`,
+          message: `Transaction failed: ${message}. Nothing was changed.`,
           signature,
         });
-        throw e;
+        return null;
       }
     },
     [publicKey, connection, program, sendTransaction, push, update, refetchAll, refetchTouched]

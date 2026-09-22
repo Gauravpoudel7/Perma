@@ -242,6 +242,45 @@ Two vectors are regression guards rather than ordinary cases; a failure in eithe
 - **V6** asserts 100 single-slot settles total exactly the same as one 100-slot settle. If this fails, the rounding policy has drifted to ceil-or-floor-per-settle and the permissionless crank becomes a griefing vector ([`07-premium-engine.md`](../02-mvp-components/07-premium-engine.md) §C).
 - **V4** asserts a late-joining short earns nothing for the period before it existed. If this fails, `poke_range` is running after a liquidity-weight change ([`08-burn-settle.md`](../02-mvp-components/08-burn-settle.md) invariant 5).
 
+### 4.5 P2 indexer and product UI
+
+Additive to the 114-case gate above — none of it may change that count. Run it
+against the same validator, **after** §4.2, because §4.2 is what puts PERMA
+transactions on the ledger for the indexer to read.
+
+```bash
+# cwd: $REPO
+yarn indexer:test       # node --test: fold fixtures + live-localnet acceptance
+```
+
+Expected: **20 passing, 0 failing**. The live tests skip themselves with a named
+reason when no validator answers or the ledger has no PERMA transactions — a skip
+is not a pass, and a vacuous green run is the thing that message exists to prevent.
+
+The reconcile test (`indexed range buckets equal on-chain RangePremiumState
+exactly`) needs a ledger whose history reaches back to `MarketCreated`. On an RPC
+that has pruned blocks, `/health` reports `historyComplete: false` and the test
+asserts that admission instead of an equality it cannot honestly check. Run §3
+with `--reset` to get the real comparison.
+
+```bash
+# cwd: $REPO/apps/web
+yarn test               # vitest: 50 cases, incl. 11 indexer-client refusal cases
+yarn check-copy         # banned-phrase list, COPY-DECK.md §5
+yarn typecheck
+yarn test:e2e           # Playwright: 47 passing, 4 skipped (webkit screenshot set)
+```
+
+Ship-blocking checks, all verifiable from the commands above:
+
+| Check | How it is proven |
+|---|---|
+| `/liquidations` is always `[]` | `indexer/test/projections.test.ts`; the client rejects a non-empty array outright |
+| No liquidation distance anywhere in the UI | There is no such component; P4 is not started |
+| `/premium/series` is empty, never interpolated | Every point carries `source: "event" \| "poll"`; an unknown source voids the whole series |
+| Inventory is never called depth | `indexer/src/routes.ts` and `IndexedCharts.tsx` both label it "Inventory by range" |
+| `fetchFreshOpenLongs` still runs before every mint-long and withdraw | Untouched by P2; `grep fetchFreshOpenLongs apps/web/src` |
+
 ## 5. Devnet deployment
 
 ```bash

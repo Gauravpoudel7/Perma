@@ -18,6 +18,18 @@ This checklist is used to review every screen before it is marked as "Design Com
 - [x] **Precision**: Monospace fonts used for all numeric/ID values. — `text-mono-*` utility classes (`--font-mono`) applied to every price/size/premium/pubkey value in `NumberInput`, `DataTile`, `PositionRow`, `CollateralSummary`, etc.
 - [x] **Motion**: Transitions are linear and fast (100ms); no "bouncing" animations. — `.transition-brand` in `tokens.css` is hardcoded `transition-duration: 100ms; transition-timing-function: linear;` with a `prefers-reduced-motion` override to `none`; it is the only transition utility used anywhere in `src/components`.
 
+## Accessibility contract (UI V2, U6)
+
+Every product screen keeps these; a change that breaks one is a regression, not a redesign.
+
+- A visually hidden "Skip to content" link is the first Tab stop on every route and moves focus to `<main id="main">`.
+- One dialog primitive, `primitives/SlideOver.tsx`, is used by every overlay (connect wallet, review mint, position detail, review deposit / withdrawal): Esc closes, Tab wraps inside, initial focus is set, the opener restores focus, the body does not scroll behind it.
+- Both navigations (`Sidenav` from `md`, `MobileTabBar` below) are `aria-label="Primary"` with `aria-current="page"`; exactly one is visible at any width.
+- Every interactive element carries `.focus-ring` (2px white, 2px offset) and `.transition-brand` (100ms linear, `prefers-reduced-motion` → none).
+- Every text input has a `<label for>`; the range slider is a named `group` and its two handles carry `aria-label` + `aria-valuetext`.
+- Disabled reasons above CTAs are `aria-live="polite"`; error toasts are `role="alert"`, other toasts and skeletons `role="status"`.
+- Enforced by `apps/web/e2e/keyboard.spec.ts` (skip link, connect-dialog trap and focus return, phone tab-bar and disclosure rings) plus the per-route checks in `shell.spec.ts`.
+
 ## Final Sign-off
 
 Signed off 2026-09-20 with real Playwright evidence — `apps/web/e2e/` (Chromium desktop 1440×900, Chromium mobile 390×844, plus WebKit desktop as a cross-engine sanity check) driving the actual dev server, not a mock. Run with `yarn test:e2e` from `apps/web`. See `docs/audits/IMPL-UI-PLAYWRIGHT-REPORT.md` for the full method, the two real bugs this pass found and fixed, and known gaps. This supersedes the prior grep-only sign-off, whose disclaimers ("not visually screenshotted," "no browser tool available") no longer apply.

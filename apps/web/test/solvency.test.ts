@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  estPremiumPerHour,
   requiredMargin,
   projectedIndex,
   payableIfSettledNow,
@@ -97,5 +98,17 @@ describe("shortAccruedPremium", () => {
     const range = { accPremiumPerShortQ64: 0n };
     const pos = { entryAccQ64: 1n << 64n, liquidity: 1n, premiumReceivable: 0n };
     expect(shortAccruedPremium(pos, range)).toBe(0n);
+  });
+});
+
+describe("estPremiumPerHour", () => {
+  it("scales the per-slot rate to 9000 slots and floors", () => {
+    // rate 1_000_000 × L 1_000_000 × mult 1_000 × 9000 / 1e12 = 9_000_000 µUSDC
+    const market = { premiumRate: 1_000_000n, premiumMultiplier: 1_000n };
+    expect(estPremiumPerHour(market, 1_000_000n)).toBe(9_000_000n);
+    expect(estPremiumPerHour(market, 0n)).toBe(0n);
+    // 1 unit: 9e12 / 1e12 = 9 exactly; 1/9000 of that floors to 0 — an estimate never rounds up.
+    expect(estPremiumPerHour(market, 1n)).toBe(9n);
+    expect(estPremiumPerHour({ premiumRate: 1n, premiumMultiplier: 1n }, 1n)).toBe(0n);
   });
 });

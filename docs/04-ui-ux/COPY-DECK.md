@@ -85,8 +85,26 @@ Screens follow [`WIREFRAMES.md`](WIREFRAMES.md).
 | CTA (short) | "Open Short" |
 | CTA (long) | "Open Long" |
 | Empty inventory | "No short liquidity in this range. A long needs existing short liquidity to open against." |
+| Range presets | "Around spot" · chips "±8" / "±32" / "±128" (tick spacings — never "ATM"/"ITM"; a range has no strike) |
+| Disabled reason (visible above the CTA) | "Enter a position size." · "No inventory in this range." · "Exceeds available inventory." · "You've reached the maximum of 8 open longs." · "Your free USDC can't cover this long's required margin." · or the §4.4 global-state string |
+| Review sheet title | "Review position" · sub-line "Check every value. Confirming opens your wallet to sign." |
+| Review rows | "Market" · "Side" · "Realized range" · "Position size" ("{n} liquidity units") · long: "Est. premium per hour, at the current rate", "Required margin" (hint "Free USDC now: {n}") · short: "Max collateral locked (slippage cap)" (hint "Orca locks what the range needs at execution, up to these caps.") |
+| Review rent line | "This range needs a new tick array. The one-time rent shown on the ticket is paid by you and not refundable while the range is in use." |
+| Review actions | "Cancel" · "Confirm Open Short" / "Confirm Open Long" |
 | Submitting | "Confirm in your wallet" |
 | Success | "Position opened. View transaction" |
+| Range picker (short side) | Collapsed by default behind "Ranges with short liquidity ({K})" · "Show" / "Hide"; "Use available short" stays visible either way |
+| Range picker, long list | "Show all ({K})" / "Show fewer" — the list is capped and scrolls; rows are never merged, summarised or hidden from the total |
+| Range picker | Heading "Open against existing shorts ({K})" · CTA "Use available short" (disabled title "No range has short liquidity left to open against.") · row "{low}–{high} USDC/SOL · ticks {l} to {u} · {n} available" · note "Short and long liquidity minted in each tick range, read from the chain. Picking a row sets the ticket to exactly those ticks." · empty = the §4.1 empty-inventory sentence |
+| Range provenance | "Selected range from inventory." — shown under the realized range only when the ticks came from the picker or a chart bar, never after a preset or slider move |
+| Toast dismiss | Button labelled "Dismiss" (`aria-label` "Dismiss notification") on every toast. Successes clear themselves after 6s, errors after 12s, a pending toast never clears on its own |
+| Inventory strip | "Inventory · selected range" · "Short liquidity" · "Long liquidity" · "Available" · zero-short note = the empty-inventory string above. Never "order book", never "depth" |
+| Premium index chart | Figure title "Premium index" · x-axis labels "slot {n}" (slots, never wall-clock dates) · dashed reference line "Live index (RPC)" · caption ends "The dashed line is the index read over RPC right now." |
+| Inventory chart | Figure title "Inventory by range" · x-axis labels "[{lower}, {upper}]" · marker "Selected range" · caption "PERMA short (muted) and long (white) liquidity minted in each tick range. The arrow marks the range selected on the ticket. This is inventory, not order book depth — PERMA has no order book." |
+| Chart pane, no indexer | "Charts need the indexer. Set NEXT_PUBLIC_INDEXER_URL to enable them." |
+| Chart pane, indexer down | "The indexer is not responding. No chart is shown." |
+| Chart pane, nothing indexed | "No indexed data for this market yet." |
+| Open positions strip | "Open positions ({n})" · "View in Portfolio" · "Showing 5 of {n}." — Side, range, size, status only; no premium, no P&L |
 
 **Banner:** required, persistent.
 
@@ -102,6 +120,10 @@ Screens follow [`WIREFRAMES.md`](WIREFRAMES.md).
 | Empty state | "No open positions. Open a short to provide liquidity, or a long to buy against existing short inventory." |
 | Closing | "Settling premium…" |
 | Closed | "Position closed. Premium settled to collateral. View transaction" |
+| Heading count | "Your Positions ({n})" — live positions only |
+| Row action | "Details" opens the position sheet; the whole row is also clickable |
+| Position sheet | Title "Position" · sub-line = the premium column note above · rows "Side" · "Realized range" (hint "ticks {l} to {u}") · "Position size" ("{n} liquidity units") · "Status" · "Accrued premium" ("Est. {n} USDC") · "Position account" (truncated address, "Copy" → "Copied", "View account") · link "Open a similar position on Trade" (prefills side + range on the ticket) · footer = Close / Settle |
+| History columns | "Event" · "Detail" · "When" (indexer block time as UTC, "—" when the indexer has none; never estimated from the slot) · "Slot" · "Transaction" |
 
 Collateral summary — "Deposited" · "Locked" · "Available" · **"Required free USDC"** — lives on
 the **Vault** screen (§4.3), not Portfolio. It is a real µUSDC amount
@@ -120,8 +142,14 @@ MVP reads no price, so a ratio would have to be invented (ADR-0003).
 | Withdraw CTA | "Withdraw" |
 | Insufficient block | "You can only withdraw free collateral. Close a position to release locked funds." *(`InsufficientFunds`)* |
 | Solvency block *(component 09)* | "This withdrawal would leave less than your open longs owe in premium. Settle or close a long first." *(`InsolventWithdrawal`)* |
-| Asset note | "SOL and USDC only. This market accepts no other collateral." |
+| Asset note | "SOL and USDC only. This market accepts no other collateral. Shorts need both in the vault; leave a little SOL in your wallet for fees." |
 | Success | "Deposit confirmed. View transaction" |
+| Tile order | "Available to withdraw" · "Required free USDC" (hint "{n} open longs" / "No open longs") · "Locked by open positions" (link "View positions" when > 0) · "Deposited" |
+| Disabled reason (visible above either CTA) | "Enter an amount." or the §4.4 global-state string |
+| Withdraw helper | "Max" chip · "Withdrawable while your longs stay covered: {n} USDC" (= free USDC − required free USDC, floored at 0; never a ratio) |
+| Review deposit | Title "Review deposit" · rows "SOL (wrapped on deposit)" · "USDC" · "Cancel" / "Confirm deposit" |
+| Review withdrawal | Title "Review withdrawal" · rows "Amount" · "Free USDC after" · "Required free USDC" · "Cancel" / "Confirm withdrawal" |
+| Review sub-line | "Check every value. Confirming opens your wallet to sign." (shared with Trade) |
 
 **Banner:** required, persistent.
 
@@ -134,6 +162,38 @@ MVP reads no price, so a ratio would have to be invented (ADR-0003).
 | Market paused | "Trading is paused. Open positions can still be closed." |
 | Transaction failed | "Transaction failed: {program error}. Nothing was changed. View transaction" |
 | RPC unavailable | "Can't reach the network. Displayed values may be stale." |
+| Loading (any skeleton) | `aria-label` "Loading" — a static placeholder block, never a shimmer, never a fake value |
+| Indexer unavailable (Portfolio history) | "The indexer is not responding, so past activity cannot be shown. Your open positions above still come straight from the chain." |
+| Indexer unavailable (Markets) | "The indexer is not responding. This page is showing live RPC reads instead." |
+| Indexer not configured | "History needs the indexer. Set NEXT_PUBLIC_INDEXER_URL to enable it." |
+| No indexed history | "No past activity indexed for this wallet." |
+| No market data | "No market data available. Check the RPC connection." |
+| Zero collateral after connect (Trade, inline, non-blocking) | "No collateral deposited. Deposit SOL or USDC in Vault to open a position." · CTA "Go to Vault" |
+| Localnet wallet not fixture-funded (Vault alert) | "This address isn't the wallet the localnet fixtures funded ({address}). Orca devUSDC can't be minted on a local validator, so a USDC deposit from here will fail. Connect with the Localnet CLI keypair, or re-run make-fixtures for this address and restart the validator." |
+| Localnet funded wallet unknown (Vault) | "Run yarn sync-fixture-wallet to check this wallet against the one the localnet fixtures funded." |
+| Localnet mismatch (Trade nudge, extra line) | "On localnet, only the fixture-funded wallet holds USDC. Vault explains how to connect it." |
+| Deposit disabled, localnet mismatch with a USDC amount | "This wallet holds no localnet USDC. Deposit SOL only, or connect the fixture-funded wallet." |
+| Localnet wallet entry (connect dialog) | "Localnet CLI keypair (fixtures)" · "Signs with a Solana CLI keypair you load below. The file is read in this browser and kept in memory only. Local testing only. Never use a mainnet key here." · field "Load CLI keypair JSON" |
+| Keypair file rejected | "That file isn't a Solana CLI keypair. Pick the id.json written by solana-keygen." |
+| Keypair is the wrong wallet | "This keypair is {address}, not the fixture-funded wallet {address}. Use that key, or re-run make-fixtures with this one and restart the validator." |
+| Transaction failed, no localnet funds | "Not enough SOL or USDC in this wallet on localnet. Fixtures fund the CLI wallet only — import that key or regenerate fixtures for this address." |
+
+### 4.5 Navigation
+
+| Element | Copy |
+|---|---|
+| Primary nav labels (sidenav `md+`, tab bar `<md`) | "Trade" · "Portfolio" · "Vault" · "Markets" — identical strings on both; the sidenav also carries "Docs" (external) |
+| Trade phone disclosure | "Market data" · trailing "Show" / "Hide" |
+
+### 4.6 Top bar
+
+| Element | Copy |
+|---|---|
+| Wordmark | "PERMA" |
+| Market label | "SOL/USDC · Orca Whirlpool" |
+| Spot readout | "Spot {price} USDC" — always "Spot", never "Price", "Mark" or "TWAP"; "—" while unread |
+| Status badge | "Active" / "Paused" (Paused carries the §4.4 paused copy as its `title`) |
+| Free collateral | "Free {sol} SOL · {usdc} USDC" — unlocked balances only, never a P&L |
 
 Error toasts surface the **mapped PERMA error name** from [`ERROR-CATALOG.md`](../03-api-interfaces/ERROR-CATALOG.md), never a raw Anchor discriminant and never a generic "Something went wrong."
 

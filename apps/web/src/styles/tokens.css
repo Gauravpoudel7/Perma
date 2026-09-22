@@ -17,8 +17,10 @@
   --color-text-primary: #ffffff;
   --color-text-muted: #a1a1aa;
   --color-accent: #ffffff;
+  --color-accent-hover: #e5e5e5; /* primary button hover */
   --color-success: #10b981;
   --color-danger: #ef4444;
+  --color-danger-hover: #dc2626; /* danger button hover */
   --color-solana-accent: #14f195; /* blockchain-specific markers ONLY, never a primary color */
 
   /* Fonts — sans/mono for all product UI; serif is marketing-only, never used in apps/web */
@@ -49,9 +51,22 @@
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
 
+  /* Shell chrome heights — layout constants, not brand tokens. --shell-banner-h
+     must match the rendered height of shell/PrototypeBanner.tsx (caption line +
+     py-2), with the phone override below for its two-line wrap. */
+  --shell-banner-h: 40px; /* one line; phones get two (below) */
+  --shell-tabbar-h: 56px;
+
   /* Safe-area padding for fixed banner/topbar on notched devices */
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* The banner wraps to two caption lines at phone widths (COPY-DECK §1 allows the wrap, never truncation). */
+@media (max-width: 767px) {
+  :root {
+    --shell-banner-h: 52px;
+  }
 }
 
 /* Type scale (token: weight / size / line-height / letter-spacing) */

@@ -1,8 +1,13 @@
 # RUNBOOK: Devnet Operations
 
-> **Status (2026-09-20):** the program is verified on a **local validator** with Orca cloned in (`scripts/local-validator.sh`). A devnet deployment has not been performed yet; the steps below are the intended procedure, and the ones marked **TODO** name tooling that does not exist in the repo.
+> **Status (2026-09-22):** the program is verified on a **local validator** with Orca cloned in (`scripts/local-validator.sh`). **Public Solana-devnet deployment is still outstanding**, blocked on funding: `solana program show 4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt -u https://api.devnet.solana.com` returns "Unable to find the account", the deploy needs **6.05 SOL** of program-data rent (581 KB × 2), and the deploy wallet `7eDWS2L8mHFJtzDECyMBwNkYkhV1xvWewRKxPUg4ELnY` holds 0 SOL — every `solana airdrop` attempt on 2026-09-22 was refused with "rate limit is reached". Fund that wallet, then run §1 and §2 below; the init tooling now exists and has been exercised on a live cluster. See `docs/audits/IMPL-DEVNET-DEPLOY-AND-UI-REPORT.md`.
 
 ## Deployment Process
+
+## Status (2026-09-22 NPT)
+
+**DEPLOYED on public Solana-devnet.** Program `4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt` live; GlobalConfig + market initialized via `yarn init-market`. Wallet remaining ~6.97 SOL after deploy. IDL upload failed (npm cache perms on `~/.npm`) — on-chain program is fine; fix later with `sudo chown -R $(whoami) ~/.npm` then `anchor idl init` if needed. Seed shorts still deferred.
+
 
 ### 1. Program Deployment
 ```bash
@@ -14,10 +19,24 @@ anchor deploy --provider.cluster devnet
 
 The allowlisted Whirlpool is resolved and fixed: **`2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G`** (SOL/devUSDC, `tick_spacing = 8`, ~20 USDC/SOL). It is hard-coded in the tests and fixtures — there is no `PERMA_WHIRLPOOL` environment variable. See [`FIXTURES-AND-VECTORS.md`](../06-testing/FIXTURES-AND-VECTORS.md) §6.
 
-`initialize_global_config(pool)` then `create_market()` — both admin-signed, both idempotent-guarded (`init`). **TODO:** no `yarn scripts:init-market` exists; the two calls are made by every test suite's `before()` hook (`tests/factory.ts` is the reference).
+`initialize_global_config(pool)` then `create_market()` — both admin-signed, both idempotent-guarded (`init`). Run them with:
+
+```bash
+ANCHOR_PROVIDER_URL=https://api.devnet.solana.com \
+ANCHOR_WALLET=~/.config/solana/id.json \
+yarn init-market
+```
+
+`scripts/init-devnet-market.mjs` is safe to re-run: it creates the two PERMA vaults (ATAs of the
+`market_authority` PDA for the pool's mints, read live from the Whirlpool account — `create_market`
+requires them to exist already), calls `initialize_global_config` and `create_market` only where the
+account is missing, refuses to run if the program is not deployed on that cluster, warns if an
+existing `GlobalConfig` has a different admin or allowlisted pool, and prints the full address table
+for this document. Verified against a live validator on 2026-09-22: the vaults it derives are exactly
+the fixture vaults `3umaZ…` / `HNR1X…`, and a second run reports every account as already existing.
 
 ### 3. Seeding Liquidity (For Demo)
-To ensure longs can be opened, the market needs short liquidity in the demo range **18–22 USDC** (ticks `-40176` / `-38168`). **TODO:** no `yarn scripts:seed-shorts` exists; `tests/position-short.ts`'s `mintShort` helper is the working pattern.
+To ensure longs can be opened, the market needs short liquidity in the demo range **18–22 USDC** (ticks `-40176` / `-38168`). **TODO:** no `yarn scripts:seed-shorts` exists; `tests/position-short.ts`'s `mintShort` helper is the working pattern. On Solana-devnet this also needs devUSDC in the admin wallet, which has no faucet — swap a little SOL for it on Orca's devnet app first. Until a short exists, Trade honestly shows "No short liquidity in this range."
 
 ## Monitoring & Maintenance
 
