@@ -43,14 +43,47 @@ export const WHIRLPOOL = new PublicKey(
 );
 
 /**
- * Pyth `PriceUpdateV2` (SOL/USD) every `mint_position` must pass (ADR-0004).
+ * Pyth `PriceUpdateV2` (SOL/USD) for a P3 `mint_position` (ADR-0004).
  * Defaults to the localnet mock receiver's tag-0 feed, kept fresh by
- * `node scripts/mock-price.mjs --loop`. Devnet has no usable value yet: its
- * pool trades far from real SOL/USD (ticket P3-DEVNET-POOL-PRICE).
+ * `node scripts/mock-price.mjs --loop`.
+ *
+ * Solana-devnet mints omit this account until that program is upgraded to P3.
+ * The deployed program is still pre-P3: the allowlisted pool trades far from
+ * real SOL/USD, so the upgrade is blocked
+ * (docs/audits/P3-DEVNET-POOL-PRICE.md). `mintExpectsPriceUpdate` decides
+ * whether a mint includes this key.
  */
 export const PRICE_UPDATE = new PublicKey(
   process.env.NEXT_PUBLIC_PRICE_UPDATE ?? "2SicEErwKeJkYv3ZUL35axMrGxqeKKUqsq3K7UH88Jrf"
 );
+
+/**
+ * Whether `mint_position` must include the P3 `price_update` account.
+ *
+ * The checked-in IDL is P3: `price_update` is a required named account. The
+ * program currently running on Solana-devnet is the pre-P3 build and has no
+ * such account. Anchor still appends the meta, the program reads it as
+ * `remaining_accounts`, and the mint fails with UnexpectedRemainingAccounts
+ * (6024) before the transaction lands. Localnet runs the P3 program, so
+ * localnet mints keep the account.
+ *
+ * Default: include on every cluster except `devnet`. After the Solana-devnet
+ * program is upgraded to P3, set `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`
+ * and point `NEXT_PUBLIC_PRICE_UPDATE` at a real posted feed. `=0` forces
+ * the pre-P3 account list on any cluster (including localnet).
+ *
+ * `process.env.NEXT_PUBLIC_*` is read as a static property access so Next
+ * inlines it into the client bundle. See the note on `requireEnv`.
+ */
+export function mintExpectsPriceUpdate(
+  cluster: string = process.env.NEXT_PUBLIC_CLUSTER ?? "localnet",
+  flag: string | undefined = process.env.NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE
+): boolean {
+  const override = flag?.trim().toLowerCase();
+  if (override === "1" || override === "true") return true;
+  if (override === "0" || override === "false") return false;
+  return cluster !== "devnet";
+}
 
 /** The Orca Whirlpool program. Public, stable, same address on every cluster. */
 export const WHIRLPOOL_PROGRAM_ID = new PublicKey(

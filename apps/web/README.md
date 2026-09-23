@@ -98,6 +98,15 @@ Leave `NEXT_PUBLIC_INDEXER_URL` and `NEXT_PUBLIC_LOCALNET_FUNDED_WALLET` unset. 
 the chart pane shows its empty state, which is the honest result; the localnet funded-wallet check
 does not apply off localnet.
 
+The program on Solana-devnet is still pre-P3: `mint_position` has no `price_update` account.
+With `NEXT_PUBLIC_CLUSTER=devnet` the client omits that account so the mint is not rejected as
+`UnexpectedRemainingAccounts` (6024). Localnet stays on P3 and still passes it. Restart Next after
+changing the cluster. After the P3 Solana-devnet upgrade (`docs/audits/P3-DEVNET-POOL-PRICE.md`),
+set `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1` and `NEXT_PUBLIC_PRICE_UPDATE` to the posted feed.
+
+To check a short on Solana-devnet: liquidity `1000000`, ticks near spot (about 18–22) aligned to
+spacing 8.
+
 Then, in the browser:
 
 1. Switch Phantom (or any Wallet Standard wallet) to **Devnet**. The Localnet CLI keypair entry is

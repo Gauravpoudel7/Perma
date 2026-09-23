@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## [Unreleased] - 2026-09-23 — Solana-devnet mint matches the pre-P3 program
+### Fixed
+- Web `mint_position` on Solana-devnet (`NEXT_PUBLIC_CLUSTER=devnet`) omits the P3 `price_update` account. The live program is still pre-P3 (`docs/audits/P3-DEVNET-POOL-PRICE.md`); the extra account was `remaining_accounts` and the mint failed with `UnexpectedRemainingAccounts` (6024) before the transaction landed. Localnet still passes the account. After the Solana-devnet program is upgraded to P3, set `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`.
+- Failed-transaction toasts map logs that contain error number 6024 / `0x1788` to the `UnexpectedRemainingAccounts` copy.
+### Impact
+- `apps/web` client only. No program, IDL, or deploy change.
+
 ## [Unreleased] — product charter: Orca-only Protocol V1
 ### Changed
 - Protocol V1 stays on **Orca Whirlpools only**; Raydium / non-Orca adapters deferred beyond V1 ([`09-post-mvp/CHARTER-ORCA-ONLY.md`](09-post-mvp/CHARTER-ORCA-ONLY.md)). Roadmap P6 = additional allowlisted Orca pools; P7 clarifies mainnet vs continuous devnet testing.

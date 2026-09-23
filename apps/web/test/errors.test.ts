@@ -50,6 +50,37 @@ describe("parseAnchorError", () => {
     const { name } = parseAnchorError(new Error("User rejected the request"));
     expect(name).toBe("UserRejected");
   });
+
+  it("maps a Phantom 'Unexpected error' whose logs only carry 6024", () => {
+    const parsed = parseAnchorError({
+      name: "WalletSendTransactionError",
+      message: "Unexpected error",
+      error: {
+        message: "Unexpected error",
+        transactionMessage: "Error processing Instruction 0: custom program error: 0x1788",
+        logs: [
+          "Program 4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt invoke [1]",
+          "Program 4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt failed: custom program error: 0x1788",
+        ],
+      },
+    });
+    expect(parsed.name).toBe("UnexpectedRemainingAccounts");
+    expect(parsed.message).toBe(PERMA_ERROR_COPY.UnexpectedRemainingAccounts);
+  });
+
+  it("maps Error Number 6024 when the Anchor name is absent", () => {
+    const parsed = parseAnchorError({
+      message: "Unexpected error",
+      logs: ["Program log: AnchorError occurred. Error Number: 6024. Error Message: Unexpected remaining accounts supplied."],
+    });
+    expect(parsed.name).toBe("UnexpectedRemainingAccounts");
+    expect(parsed.message).toBe(PERMA_ERROR_COPY.UnexpectedRemainingAccounts);
+  });
+
+  it("does not treat an unrelated 6024 amount as UnexpectedRemainingAccounts", () => {
+    const parsed = parseAnchorError(new Error("Transfer: insufficient lamports 6024, need 1000000"));
+    expect(parsed.name).toBe("WalletInsufficientFunds");
+  });
 });
 
 describe("localnet funding failures", () => {

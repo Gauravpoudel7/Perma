@@ -78,8 +78,14 @@ function flattenThrown(e: unknown): { messages: string[]; logs: string[] } {
       cause?: unknown;
       name?: unknown;
     };
-    if (Array.isArray(o.logs)) {
-      for (const line of o.logs) if (typeof line === "string") logs.push(line);
+    const logSources = [o.logs, (o as { transactionLogs?: unknown }).transactionLogs];
+    for (const source of logSources) {
+      if (!Array.isArray(source)) continue;
+      for (const line of source) if (typeof line === "string") logs.push(line);
+    }
+    const transactionMessage = (o as { transactionMessage?: unknown }).transactionMessage;
+    if (typeof transactionMessage === "string" && transactionMessage.trim()) {
+      messages.push(transactionMessage);
     }
     if (typeof o.message === "string" && o.message.trim()) messages.push(o.message);
     else if (typeof o.name === "string" && o.name.trim()) messages.push(o.name);
@@ -123,6 +129,24 @@ export function parseAnchorError(e: unknown): ParsedPermaError {
     if (knownMessage && logBlob.includes(knownName)) {
       return { name: knownName, message: knownMessage };
     }
+  }
+
+  // Phantom often surfaces only "Unexpected error" and leaves the Anchor name
+  // out of the message. The pre-P3 Solana-devnet mismatch shows up as custom
+  // program error 6024 (0x1788) / UnexpectedRemainingAccounts in the logs.
+  const blobForCode = `${raw}\n${logBlob}`;
+  const remainingAccountsCopy = PERMA_ERROR_COPY.UnexpectedRemainingAccounts;
+  if (
+    remainingAccountsCopy &&
+    (/Error Number:\s*6024\b/.test(blobForCode) ||
+      /custom program error:\s*(?:0x1788|6024)\b/i.test(blobForCode) ||
+      /"Custom"\s*:\s*6024\b/.test(blobForCode) ||
+      /Custom\(6024\)/.test(blobForCode))
+  ) {
+    return {
+      name: "UnexpectedRemainingAccounts",
+      message: remainingAccountsCopy,
+    };
   }
 
   if (/user rejected/i.test(raw)) {
