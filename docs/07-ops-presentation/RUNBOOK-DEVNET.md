@@ -38,6 +38,35 @@ the fixture vaults `3umaZ…` / `HNR1X…`, and a second run reports every accou
 ### 3. Seeding Liquidity (For Demo)
 To ensure longs can be opened, the market needs short liquidity in the demo range **18–22 USDC** (ticks `-40176` / `-38168`). **TODO:** no `yarn scripts:seed-shorts` exists; `tests/position-short.ts`'s `mintShort` helper is the working pattern. On Solana-devnet this also needs devUSDC in the admin wallet, which has no faucet — swap a little SOL for it on Orca's devnet app first. Until a short exists, Trade honestly shows "No short liquidity in this range."
 
+### 4. Pool price vs Pyth (P3 prerequisite)
+
+P3's `mint_position` refuses when the pool's Spot is more than **2%** (`MAX_DEVIATION_BPS = 200`) from Pyth SOL/USD, with devUSDC treated as USD 1:1 (ADR-0004). The devnet pool traded near ~$20 while Pyth read ~$118, so the Solana-devnet program stays **pre-P3** until the pool is moved. Ticket: [`P3-DEVNET-POOL-PRICE.md`](../audits/P3-DEVNET-POOL-PRICE.md). The fix is to swap on the pool itself; never widen the band and never point devnet at the localnet mock receiver.
+
+```bash
+node scripts/rebalance-devnet-pool.mjs --measure                  # Spot, tick, Pyth, deviation bps. No txs.
+node scripts/rebalance-devnet-pool.mjs --plan                     # direction, total input, per-step table. No txs.
+node scripts/rebalance-devnet-pool.mjs --step 500 --dry-run       # build + simulate one swap
+node scripts/rebalance-devnet-pool.mjs --step 500 | tee -a rebalance.jsonl   # one live swap, JSON log line
+node scripts/rebalance-devnet-pool.mjs --until-within-bps 200 --max-step 500 --max-steps 12   # opt-in loop
+```
+
+- The swapper is `ANCHOR_WALLET` (default `~/.config/solana/id.json`, the admin/CLI wallet). The RPC comes from `SOLANA_RPC` / `ANCHOR_PROVIDER_URL` (default public devnet; use a Helius devnet URL if rate-limited). The script refuses any cluster whose genesis hash is not Solana-devnet's.
+- **Within 2%** means `|spot − pyth| / pyth ≤ 0.02`, where Spot is the pool's `sqrt_price` in USDC/SOL.
+- Pyth is read from its on-chain sponsored SOL/USD push account (`7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE`; ADR-0004 feed id, VerificationLevel Full). Public Hermes answered HTTP 401 from the ops Mac. Override the account with `PYTH_PRICE_ACCOUNT`. Never use a CEX price as the gate.
+- `--step` amounts are in the input token. That is devUSDC while Spot is below Pyth (buys WSOL, raises Spot) and WSOL while Spot is above Pyth.
+- Each swap's price limit is Pyth or the edge of its three tick arrays, whichever comes first. A step therefore never overshoots Pyth, and the script sends only what reaching that limit needs.
+- **Re-check right before any P3 upgrade.** SOL moves, and other devnet WSOL/devUSDC pools still trade at ~$20, so an arbitrage bot can pull this pool back. Re-run `--measure`, and `--until-within-bps 200` if needed.
+- The live run can take more steps than `--plan` predicts. A swap that stops at an array edge leaves the tick one below it, so the next window starts one array earlier. The total input stays the same. Orca accepted the uninitialized tick arrays on the path, so none had to be created.
+
+Practice devUSDC for the swapper comes from Orca's devToken distributor, the one behind the Nebula faucet UI. Each call costs 0.1 SOL and gives 15 devUSDC. The script refuses any wallet except the admin, refuses any cluster except Solana-devnet, and keeps at least 1 SOL:
+
+```bash
+node scripts/fund-devusdc-faucet.mjs --once                       # one call; prints SOL/USDC before/after + sig
+node scripts/fund-devusdc-faucet.mjs --until 3600 --per-tx 10     # loop until the devUSDC balance reaches the target
+```
+
+2026-09-23 run: the pool was moved from 19.96 to 117.37 (0 bps) with 11 swaps and 3,292 devUSDC. Details: [`IMPL-P3-DEVNET-POOL-PRICE-REPORT.md`](../audits/IMPL-P3-DEVNET-POOL-PRICE-REPORT.md).
+
 ## Monitoring & Maintenance
 
 ### Checking Market Status
