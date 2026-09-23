@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## [Unreleased] - 2026-09-23 — Solana-devnet P3 upgrade follow-on (client + ops, no live deploy)
+### Added
+- Solana-devnet mints can post a fully verified Pyth SOL/USD update before `mint_position` once `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`. Hermes is fetched server-side (`PYTH_API_KEY`, not committed). A sponsored account younger than 60 seconds is used as-is. `post_update_atomic` is not used: PERMA requires VerificationLevel Full. The post is a prior transaction (short mint headroom is 43 bytes).
+- `scripts/upgrade-devnet-p3.mjs` (`--check` / `--deploy`) and `yarn smoke-devnet-p3` (`--check` / `--smoke`) for the operator Mac. Close and Settle stay oracle-free.
+### Notes
+- The live program `4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt` was still the pre-P3 ELF (594,752 bytes, slot 502540621) when this was written. This change does not upgrade it. `MAX_DEVIATION_BPS` is unchanged. No mock Pyth on Solana-devnet.
+
 ## [Unreleased] - 2026-09-23 — Portfolio Pending Premium settle
 ### Fixed
 - A Short in `Pending Premium` (liquidity already 0, `premium_receivable` still owed) no longer shows Close. `burn_position` requires Open and was failing with `PositionAlreadyClosed`. Settle is offered when the range escrow can pay (`settle_premium`); otherwise the row says there is nothing to settle yet and that it is waiting for a long to fund the escrow. Open shorts still Close via burn. Open longs keep the 0.001 USDC Settle floor; Close still settles them.

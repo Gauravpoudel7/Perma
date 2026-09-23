@@ -93,6 +93,7 @@ Screens follow [`WIREFRAMES.md`](WIREFRAMES.md).
 | Review actions | "Cancel" · "Confirm Open Short" / "Confirm Open Long" |
 | Submitting | "Confirm in your wallet" |
 | Success | "Position opened. View transaction" |
+| Pyth post (Solana-devnet, after the P3 upgrade) | "Pyth verification posted." · "Pyth price posted." · "Pyth update account closed." · "Tick array created." The price is posted in an earlier transaction than the mint. |
 | Range picker (short side) | Collapsed by default behind "Ranges with short liquidity ({K})" · "Show" / "Hide"; "Use available short" stays visible either way |
 | Range picker, long list | "Show all ({K})" / "Show fewer" — the list is capped and scrolls; rows are never merged, summarised or hidden from the total |
 | Range picker | Heading "Open against existing shorts ({K})" · CTA "Use available short" (disabled title "No range has short liquidity left to open against.") · row "{low}–{high} USDC/SOL · ticks {l} to {u} · {n} available" · note "Short and long liquidity minted in each tick range, read from the chain. Picking a row sets the ticket to exactly those ticks." · empty = the §4.1 empty-inventory sentence |

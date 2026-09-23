@@ -67,6 +67,30 @@ node scripts/fund-devusdc-faucet.mjs --until 3600 --per-tx 10     # loop until t
 
 2026-09-23 run: the pool was moved from 19.96 to 117.37 (0 bps) with 11 swaps and 3,292 devUSDC. Details: [`IMPL-P3-DEVNET-POOL-PRICE-REPORT.md`](../audits/IMPL-P3-DEVNET-POOL-PRICE-REPORT.md).
 
+### 5. P3 program upgrade (operator Mac — not done in-repo)
+
+The Solana-devnet program stays pre-P3 until this section is run by the upgrade authority. A read on 2026-09-23 still showed ELF **594752**, slot **502540621**, authority `7eDWS2L8mHFJtzDECyMBwNkYkhV1xvWewRKxPUg4ELnY`. Full notes: [`IMPL-P3-DEVNET-UPGRADE.md`](../audits/IMPL-P3-DEVNET-UPGRADE.md).
+
+> **Prototype. Not audited. Single pool. Not production mainnet risk capital.**
+
+```bash
+node scripts/rebalance-devnet-pool.mjs --measure
+# OUTSIDE 200 bps → node scripts/rebalance-devnet-pool.mjs --until-within-bps 200 --max-step 50
+anchor build --arch v0
+node scripts/upgrade-devnet-p3.mjs          # read-only: ELF, authority, measure, the deploy command
+node scripts/upgrade-devnet-p3.mjs --deploy # admin key only; refuses mainnet and a foreign wallet
+node scripts/upgrade-devnet-p3.mjs          # ELF must no longer be 594752
+```
+
+Then in `apps/web/.env.local` (do not commit): `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`, `NEXT_PUBLIC_PRICE_UPDATE=7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE`, and `PYTH_API_KEY` for Hermes. Restart Next.
+
+```bash
+cd apps/web && yarn smoke-devnet-p3 -- --check
+cd apps/web && yarn smoke-devnet-p3 -- --smoke
+```
+
+`--smoke` posts a Full Pyth update (or reuses the sponsored account when it is ≤ 60 s old), mints a Short and a Long near spot, closes the ephemeral Pyth accounts, then Settle and Close. Those exits do not pass `price_update`. Do not deploy the localnet mock receiver. Do not widen `MAX_DEVIATION_BPS`.
+
 ## Monitoring & Maintenance
 
 ### Checking Market Status

@@ -12,7 +12,8 @@
     "lint": "cargo fmt --check && cargo clippy -- -D warnings",
     "reconcile": "node scripts/reconcile.mjs",
     "monitor": "node scripts/reconcile.mjs --monitor",
-    "init-market": "node scripts/init-devnet-market.mjs"
+    "init-market": "node scripts/init-devnet-market.mjs",
+    "upgrade-devnet-p3": "node scripts/upgrade-devnet-p3.mjs"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

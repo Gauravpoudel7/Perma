@@ -98,11 +98,17 @@ Leave `NEXT_PUBLIC_INDEXER_URL` and `NEXT_PUBLIC_LOCALNET_FUNDED_WALLET` unset. 
 the chart pane shows its empty state, which is the honest result; the localnet funded-wallet check
 does not apply off localnet.
 
-The program on Solana-devnet is still pre-P3: `mint_position` has no `price_update` account.
-With `NEXT_PUBLIC_CLUSTER=devnet` the client omits that account so the mint is not rejected as
-`UnexpectedRemainingAccounts` (6024). Localnet stays on P3 and still passes it. Restart Next after
-changing the cluster. After the P3 Solana-devnet upgrade (`docs/audits/P3-DEVNET-POOL-PRICE.md`),
-set `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1` and `NEXT_PUBLIC_PRICE_UPDATE` to the posted feed.
+The program on Solana-devnet is still pre-P3 until an operator with the admin key upgrades it
+(`docs/audits/IMPL-P3-DEVNET-UPGRADE.md`). With `NEXT_PUBLIC_CLUSTER=devnet` the client omits
+`price_update` so the mint is not rejected as `UnexpectedRemainingAccounts` (6024). Localnet stays
+on P3 and still passes the mock feed. Restart Next after changing the cluster.
+
+After that upgrade lands, set `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`. Leave
+`NEXT_PUBLIC_PRICE_UPDATE` unset to use the sponsored SOL/USD account
+`7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE`, or set it to that address. Put `PYTH_API_KEY` in
+`.env.local` (never commit it). A mint then uses the sponsored account when it is younger than 60
+seconds, and otherwise posts a fully verified Pyth update in an earlier transaction. Close and
+Settle do not read the oracle. Do not point Solana-devnet at the localnet mock feed.
 
 To check a short on Solana-devnet: liquidity `1000000`, ticks near spot (about 18–22) aligned to
 spacing 8.

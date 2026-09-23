@@ -91,7 +91,7 @@ export function useSendPermaTx() {
   const send = useCallback(
     async (
       ixs: TransactionInstruction[],
-      opts: { successMessage: string; extraSigners?: Signer[] }
+      opts: { successMessage: string; extraSigners?: Signer[]; failureSuffix?: string }
     ): Promise<string | null> => {
       if (!publicKey) throw new Error("Connect a wallet to continue.");
 
@@ -124,7 +124,7 @@ export function useSendPermaTx() {
         const signature = (e as { signature?: string })?.signature;
         update(toastId, {
           variant: "error",
-          message: `Transaction failed: ${message}. Nothing was changed.`,
+          message: `Transaction failed: ${message}. ${opts.failureSuffix ?? "Nothing was changed."}`,
           signature,
         });
         return null;
