@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## [Unreleased] - 2026-09-23 — Portfolio Pending Premium settle
+### Fixed
+- A Short in `Pending Premium` (liquidity already 0, `premium_receivable` still owed) no longer shows Close. `burn_position` requires Open and was failing with `PositionAlreadyClosed`. Settle is offered when the range escrow can pay (`settle_premium`); otherwise the row says there is nothing to settle yet and that it is waiting for a long to fund the escrow. Open shorts still Close via burn. Open longs keep the 0.001 USDC Settle floor; Close still settles them.
+### Impact
+- `apps/web` Portfolio only. No program, IDL, or deploy change.
+
 ## [Unreleased] - 2026-09-23 — Solana-devnet mint matches the pre-P3 program
 ### Fixed
 - Web `mint_position` on Solana-devnet (`NEXT_PUBLIC_CLUSTER=devnet`) omits the P3 `price_update` account. The live program is still pre-P3 (`docs/audits/P3-DEVNET-POOL-PRICE.md`); the extra account was `remaining_accounts` and the mint failed with `UnexpectedRemainingAccounts` (6024) before the transaction landed. Localnet still passes the account. After the Solana-devnet program is upgraded to P3, set `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`.

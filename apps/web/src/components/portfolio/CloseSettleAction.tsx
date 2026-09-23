@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
-import { Button } from "../primitives/Button";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { CloseSettleView } from "./CloseSettleView";
 import { useSendPermaTx } from "../../hooks/useSendPermaTx";
 import { usePermaProgram } from "../../hooks/usePermaProgram";
 import { useWalletGuard } from "../../hooks/useWalletGuard";
@@ -10,26 +10,29 @@ import { useChainStore } from "../../store/useChainStore";
 import { buildBurnPositionIx, buildSettlePremiumIx } from "../../lib/perma";
 import { resolveShortOrcaAccounts } from "../../lib/resolvePosition";
 import { marketAuthorityPda } from "../../lib/pda";
-import { LEG_LONG, LEG_SHORT } from "../../lib/constants";
+import { LEG_LONG, LEG_SHORT, STATUS_PENDING_PREMIUM } from "../../lib/constants";
+import type { PositionActions } from "../../lib/positionActions";
 import type { PositionWithPubkey } from "../../lib/accounts";
 
 /**
- * "Close" for a short, or a long with nothing owed. "Settle" (routes to
- * `settle_premium`, not burn) for a long with a positive accrued amount.
- * This split isn't in COPY-DECK's verbatim table but is exactly what the
- * task's honesty-override action list specifies ("Close / Settle"); the two
- * buttons reuse COPY-DECK's exact "Closing…"/"Settling premium…" and
- * "Position closed…" strings.
+ * Wires Portfolio Close / Settle to the existing instruction builders.
+ *
+ * Open short, and a long with nothing owed: Close → `burn_position`.
+ * Open long above the U9 dust floor: Settle → `settle_premium` (stays open).
+ * Pending Premium short: never Close. `burn_position` requires status Open
+ * and returns `PositionAlreadyClosed`. Settle → `settle_premium` only when
+ * `positionActions` says the range escrow can pay; otherwise the waiting line.
  */
 export function CloseSettleAction({
   position,
-  hasAccrued,
+  actions,
+  shortPayable,
 }: {
   position: PositionWithPubkey;
-  hasAccrued: boolean;
+  actions: PositionActions;
+  shortPayable: bigint | null;
 }) {
   const { publicKey } = useWallet();
-  const { connection } = useConnection();
   const program = usePermaProgram();
   const { send } = useSendPermaTx();
   const { canTransact, reason } = useWalletGuard({ allowWhilePaused: true });
@@ -40,7 +43,24 @@ export function CloseSettleAction({
   if (!market || !marketPubkey || !publicKey) return null;
   const [marketAuthority] = marketAuthorityPda(marketPubkey);
 
+  const pending = position.status === STATUS_PENDING_PREMIUM;
+  // Belt on the view-model. Pending Premium is not Open, so burn cannot succeed.
+  // A pending long is not a protocol state; if one appears, offer neither action.
+  const viewActions: PositionActions =
+    pending && position.legType !== LEG_SHORT
+      ? {
+          showClose: false,
+          showSettle: false,
+          awaitingPremium: true,
+          settleClosesAccount: false,
+          partialSettle: false,
+        }
+      : pending
+        ? { ...actions, showClose: false }
+        : actions;
+
   async function handleClose() {
+    if (position.status === STATUS_PENDING_PREMIUM) return;
     setBusy("close");
     try {
       const ix =
@@ -72,6 +92,8 @@ export function CloseSettleAction({
   }
 
   async function handleSettle() {
+    const pendingShort = position.status === STATUS_PENDING_PREMIUM && position.legType === LEG_SHORT;
+    if (position.legType !== LEG_LONG && !pendingShort) return;
     setBusy("settle");
     try {
       const ix = await buildSettlePremiumIx(program, {
@@ -83,30 +105,25 @@ export function CloseSettleAction({
         tickUpper: position.tickUpper,
         vaultB: market!.vaultB,
       });
-      await send([ix], { successMessage: "Premium settled to collateral." });
+      await send([ix], {
+        successMessage: viewActions.settleClosesAccount
+          ? "Position closed. Premium settled to collateral."
+          : "Premium settled to collateral.",
+      });
     } finally {
       setBusy(null);
     }
   }
 
-  // `hasAccrued` is `usePositionSummary.canSettle` — a long owing at least
-  // `SETTLE_DUST_USDC_MICRO`. The leg check stays as a belt to that brace.
-  const showSettle = position.legType === LEG_LONG && hasAccrued;
-
   return (
-    <div className="flex items-center gap-2" title={canTransact ? undefined : reason ?? undefined}>
-      {showSettle && (
-        <Button
-          variant="secondary"
-          disabled={!canTransact || busy !== null}
-          onClick={handleSettle}
-        >
-          {busy === "settle" ? "Settling premium…" : "Settle"}
-        </Button>
-      )}
-      <Button variant="danger" disabled={!canTransact || busy !== null} onClick={handleClose}>
-        {busy === "close" ? "Closing…" : "Close"}
-      </Button>
-    </div>
+    <CloseSettleView
+      actions={viewActions}
+      shortPayable={shortPayable}
+      busy={busy}
+      disabled={!canTransact || busy !== null}
+      disabledReason={canTransact ? undefined : reason ?? undefined}
+      onClose={() => void handleClose()}
+      onSettle={() => void handleSettle()}
+    />
   );
 }

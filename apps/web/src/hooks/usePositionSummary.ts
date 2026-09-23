@@ -2,7 +2,8 @@
 
 import { useChainStore } from "../store/useChainStore";
 import { useRangeState } from "./useRangeState";
-import { isSettleable, payableIfSettledNow, projectedIndex, shortAccruedPremium } from "../lib/solvency";
+import { payableIfSettledNow, projectedIndex, shortAccruedPremium, shortPayableNow } from "../lib/solvency";
+import { positionActions, type PositionActions } from "../lib/positionActions";
 import { tickToPrice } from "../lib/whirlpool";
 import { LEG_LONG, STATUS_PENDING_PREMIUM } from "../lib/constants";
 import type { PositionWithPubkey } from "../lib/accounts";
@@ -19,8 +20,13 @@ export interface PositionSummary {
   liquidity: bigint;
   /** Display-only "Accrued Premium (Est.)" in µUSDC; see the math note below. */
   accrued: bigint;
-  /** Whether to offer "Settle": a long owing at least `SETTLE_DUST_USDC_MICRO`. The only producer of that answer. */
-  canSettle: boolean;
+  /**
+   * µUSDC `settle_premium` would pay a short now. Null until the range
+   * account has loaded. Zero when the escrow is empty.
+   */
+  shortPayable: bigint | null;
+  /** Close / Settle flags. The only producer; rows and the detail sheet both read this. */
+  actions: PositionActions;
   pending: boolean;
   statusLabel: "Open" | "Pending Premium";
 }
@@ -43,7 +49,11 @@ export function usePositionSummary(position: PositionWithPubkey): PositionSummar
 
   const isLong = position.legType === LEG_LONG;
 
+  const pending = position.status === STATUS_PENDING_PREMIUM;
+  const receivable = BigInt(position.premiumReceivable.toString());
+
   let accrued = 0n;
+  let shortPayable: bigint | null = null;
   if (isLong && premiumIndex) {
     const projected = projectedIndex(
       { currentIndex: BigInt(premiumIndex.currentIndex.toString()), lastUpdateSlot: BigInt(premiumIndex.lastUpdateSlot.toString()) },
@@ -62,17 +72,29 @@ export function usePositionSummary(position: PositionWithPubkey): PositionSummar
       BigInt(market.premiumMultiplier.toString())
     );
   } else if (!isLong && rangeState) {
-    accrued = shortAccruedPremium(
-      {
-        entryAccQ64: BigInt(position.entryAccQ64.toString()),
-        liquidity: BigInt(position.liquidity.toString()),
-        premiumReceivable: BigInt(position.premiumReceivable.toString()),
-      },
-      { accPremiumPerShortQ64: BigInt(rangeState.accPremiumPerShortQ64.toString()) }
-    );
+    const shortPos = {
+      entryAccQ64: BigInt(position.entryAccQ64.toString()),
+      liquidity: BigInt(position.liquidity.toString()),
+      premiumReceivable: receivable,
+    };
+    const range = { accPremiumPerShortQ64: BigInt(rangeState.accPremiumPerShortQ64.toString()) };
+    accrued = shortAccruedPremium(shortPos, range);
+    shortPayable = shortPayableNow(shortPos, {
+      ...range,
+      premiumPool: BigInt(rangeState.premiumPool.toString()),
+    });
+  } else if (!isLong && pending) {
+    // Liquidity is already 0, so nothing new is claimable. The carried claim
+    // is on the position and can be shown before the range account loads.
+    accrued = receivable;
   }
 
-  const pending = position.status === STATUS_PENDING_PREMIUM;
+  const actions = positionActions({
+    legType: position.legType,
+    status: position.status,
+    accrued,
+    shortPayable,
+  });
 
   return {
     isLong,
@@ -81,7 +103,8 @@ export function usePositionSummary(position: PositionWithPubkey): PositionSummar
     highPrice: tickToPrice(position.tickUpper, DECIMALS_A, DECIMALS_B),
     liquidity: BigInt(position.liquidity.toString()),
     accrued,
-    canSettle: isLong && isSettleable(accrued),
+    shortPayable,
+    actions,
     pending,
     statusLabel: pending ? "Pending Premium" : "Open",
   };

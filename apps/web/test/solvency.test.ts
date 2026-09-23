@@ -10,6 +10,7 @@ import {
   canWithdraw,
   canMintLong,
   shortAccruedPremium,
+  shortPayableNow,
   type MarketRiskFields,
 } from "../src/lib/solvency";
 
@@ -100,6 +101,30 @@ describe("shortAccruedPremium", () => {
     const range = { accPremiumPerShortQ64: 0n };
     const pos = { entryAccQ64: 1n << 64n, liquidity: 1n, premiumReceivable: 0n };
     expect(shortAccruedPremium(pos, range)).toBe(0n);
+  });
+});
+
+describe("shortPayableNow", () => {
+  const pos = { entryAccQ64: 0n, liquidity: 0n, premiumReceivable: 5_000n };
+  const range = { accPremiumPerShortQ64: 0n };
+
+  it("pays nothing when the escrow is empty — NothingToSettle", () => {
+    expect(shortPayableNow(pos, { ...range, premiumPool: 0n })).toBe(0n);
+  });
+
+  it("pays the carried claim when the escrow covers it, and only the escrow when it does not", () => {
+    expect(shortPayableNow(pos, { ...range, premiumPool: 5_000n })).toBe(5_000n);
+    expect(shortPayableNow(pos, { ...range, premiumPool: 9_000n })).toBe(5_000n);
+    expect(shortPayableNow(pos, { ...range, premiumPool: 1n })).toBe(1n);
+  });
+
+  it("caps claimable + receivable by the escrow, matching claim_short_amount", () => {
+    const earning = { entryAccQ64: 0n, liquidity: 100_000n, premiumReceivable: 5n };
+    const acc = { accPremiumPerShortQ64: 1n << 64n };
+    const owed = shortAccruedPremium(earning, acc);
+    expect(owed).toBe(100_005n);
+    expect(shortPayableNow(earning, { ...acc, premiumPool: 50n })).toBe(50n);
+    expect(shortPayableNow(earning, { ...acc, premiumPool: owed })).toBe(owed);
   });
 });
 

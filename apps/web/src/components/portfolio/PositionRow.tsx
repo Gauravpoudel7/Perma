@@ -40,11 +40,11 @@ export const PositionRow = forwardRef<
         <Badge tone={s.pending ? "warning" : "neutral"}>{s.statusLabel}</Badge>
       </Cell>
       <Cell label="Action">
-        <div className="flex items-center justify-end gap-2 md:justify-start" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center justify-end gap-2 md:justify-start" onClick={(e) => e.stopPropagation()}>
           <Button ref={detailsRef} variant="secondary" onClick={onSelect}>
             Details
           </Button>
-          <CloseSettleAction position={position} hasAccrued={s.canSettle} />
+          <CloseSettleAction position={position} actions={s.actions} shortPayable={s.shortPayable} />
         </div>
       </Cell>
     </TableRow>
