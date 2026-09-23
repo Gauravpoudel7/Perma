@@ -37,7 +37,7 @@ process.env.NEXT_PUBLIC_PERMA_PROGRAM_ID ??= "4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLU
 process.env.NEXT_PUBLIC_WHIRLPOOL ??= "2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G";
 process.env.NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE ??= "1";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 const smoke = process.argv.includes("--smoke");
 const SHORT_LIQ = 100_000n;
