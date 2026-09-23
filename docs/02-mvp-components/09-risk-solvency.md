@@ -1,6 +1,8 @@
 # Component: Risk & Solvency (Fair MVP)
 
 > **Status: SHIPPED (2026-09-20).** `risk.rs` counts accrued premium on every open long plus a horizon margin, on both `withdraw_collateral` and `mint_position(LONG)`; the `balance_b > 0` stub is gone. Decisions: [ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md). Report: [`IMPL-09-RISK-SOLVENCY-REPORT.md`](../audits/IMPL-09-RISK-SOLVENCY-REPORT.md). Audit that preceded it: [`DOCS-SYNC-AUDIT-09.md`](../audits/DOCS-SYNC-AUDIT-09.md).
+>
+> **P3 (2026-09-23):** solvency here is **unchanged** — still no price. [ADR-0004](../adr/ADR-0004-oracle-and-price-aware-risk.md) adds a separate fail-closed oracle gate (Pyth SOL/USD, staleness / confidence / spot deviation) at the top of `mint_position`, both legs; withdraw, burn and settle never read it.
 
 ## Purpose
 
@@ -152,7 +154,7 @@ Short users pass nothing: `open_longs == 0`, `0 == 0`, the index is not read, th
 | `MissingOpenLong` | both | remaining accounts are not exactly the user's open longs |
 | `TooManyOpenLongs` | long mint | `open_longs == MAX_OPEN_LONGS` |
 | `MathOverflow` | both | margin product wrapped (huge L) |
-| `OracleDeviationTooHigh` | — | **deferred (Protocol V1). Not defined, not raised.** |
+| `OracleDeviationTooHigh` | both mints | **P3 oracle gate, not this component** — see [ERROR-CATALOG §7](../03-api-interfaces/ERROR-CATALOG.md). The solvency math never reads a price. |
 
 New variants are appended to `PermaError`; on-chain codes are `6000 + index`.
 

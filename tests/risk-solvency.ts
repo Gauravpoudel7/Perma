@@ -34,6 +34,7 @@ import {
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import { assert, AssertionError } from "chai";
+import { freshPrice } from "./oracle-mock";
 
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const PERMA_WHIRLPOOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -142,7 +143,7 @@ describe("risk-solvency: long premium liability + margin (component 09)", () => 
   const strangerA = getAssociatedTokenAddressSync(WSOL, stranger.publicKey);
   const strangerB = getAssociatedTokenAddressSync(DEV_USDC, stranger.publicKey);
 
-  const mintAccounts = (p: P, lo: number, hi: number) => ({
+  const mintAccounts = async (p: P, lo: number, hi: number) => ({
     owner: p.owner,
     market,
     marketAuthority,
@@ -169,6 +170,7 @@ describe("risk-solvency: long premium liability + margin (component 09)", () => 
     whirlpoolProgram: WHIRLPOOL_PROGRAM,
     systemProgram: SystemProgram.programId,
     rent: SYSVAR_RENT_PUBKEY,
+    priceUpdate: await freshPrice(provider),
   });
 
   const openLongsOf = async (owner: PublicKey) => {
@@ -181,10 +183,10 @@ describe("risk-solvency: long premium liability + margin (component 09)", () => 
       .map((x: any) => ({ pubkey: x.publicKey, isSigner: false, isWritable: false }));
   };
 
-  const mintShort = (p: P) =>
+  const mintShort = async (p: P) =>
     program.methods
       .mintPosition(LEG_SHORT, TICK_LOWER, TICK_UPPER, SHORT_L, MAX_A, MAX_B, new BN(p.nonce))
-      .accounts(mintAccounts(p, TICK_LOWER, TICK_UPPER))
+      .accounts(await mintAccounts(p, TICK_LOWER, TICK_UPPER))
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
       .signers([p.positionMint])
       .rpc();
@@ -194,8 +196,8 @@ describe("risk-solvency: long premium liability + margin (component 09)", () => 
     program.methods
       .mintPosition(LEG_LONG, TICK_LOWER, TICK_UPPER, size, new BN(0), new BN(0), new BN(p.nonce))
       .accounts({
-        ...mintAccounts(p, TICK_LOWER, TICK_UPPER),
-        whirlpool: null, orcaPosition: null, positionMint: null, positionTokenAccount: null,
+        ...await mintAccounts(p, TICK_LOWER, TICK_UPPER),
+        orcaPosition: null, positionMint: null, positionTokenAccount: null,
         tokenMintA: null, tokenMintB: null, vaultA: null, vaultB: null,
         orcaVaultA: null, orcaVaultB: null, tickArrayLower: null, tickArrayUpper: null,
         associatedTokenProgram: null, memoProgram: null, whirlpoolProgram: null,

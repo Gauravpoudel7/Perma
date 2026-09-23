@@ -77,11 +77,21 @@ Appended to `PermaError` (so nothing above shifted). See [`09-risk-solvency.md`]
 | `0x25` | 6033 | `TooManyOpenLongs` | `open_longs == MAX_OPEN_LONGS` (8). |
 | `0x35` | 6034 | `InvalidRiskParams` | `set_market_risk_params` (component 10) rejected: zero horizon or buffer, or the margin at `risk::MARGIN_LIQUIDITY_BOUND` × `MAX_OPEN_LONGS` would overflow `u64` and brick withdraws (ADR-0003). Nothing written. |
 
-## 7. Deferred — not defined, not raised
+## 7. Oracle Errors — Protocol V1 P3
+
+Appended after the P1 errors (6035–6036), so nothing above shifted. Raised only by `mint_position` (both legs), before any state change; burn, withdraw and settle never read the oracle. See [ADR-0004](../adr/ADR-0004-oracle-and-price-aware-risk.md).
+
+| Label | On-chain | Name | Description |
+|---|---|---|---|
+| — | 6037 | `OracleUnavailable` | `price_update` is not owned by the Pyth receiver, is too short, has the wrong discriminator, is not `Full`-verified, is not the SOL/USD feed, or has a non-positive price / out-of-range exponent. (A mint that omits `whirlpool` has no spot to compare and fails `InvalidAsset` before the oracle is read.) |
+| — | 6038 | `OracleStale` | `now − publish_time > 60 s`. |
+| — | 6039 | `OracleConfidenceTooWide` | `conf > 1 %` of price. |
+| — | 6040 | `OracleDeviationTooHigh` | Whirlpool spot differs from the reference by more than 2 % (either side). |
+
+## 8. Deferred — not defined, not raised
 
 | Name | Status |
 |---|---|
-| `OracleDeviationTooHigh` | **Protocol V1.** Orca Whirlpool exposes no TWAP (`orca_whirlpools_client` 8.0.0 has no observation array; the `Oracle` PDA is adaptive-fee state). Fair MVP solvency reads no price ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)), so there is no deviation to check. Reserved for a design with an external price source. |
 | `CPIFailure` | Not defined. Orca errors propagate unmapped (see §5). |
 | `AccountNotInitialized` | Not a PERMA error — it is Anchor's own `3012` (`0xbc4`), raised when a required account has no data. |
 

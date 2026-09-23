@@ -42,6 +42,16 @@ export const WHIRLPOOL = new PublicKey(
   requireEnv("NEXT_PUBLIC_WHIRLPOOL", process.env.NEXT_PUBLIC_WHIRLPOOL)
 );
 
+/**
+ * Pyth `PriceUpdateV2` (SOL/USD) every `mint_position` must pass (ADR-0004).
+ * Defaults to the localnet mock receiver's tag-0 feed, kept fresh by
+ * `node scripts/mock-price.mjs --loop`. Devnet has no usable value yet: its
+ * pool trades far from real SOL/USD (ticket P3-DEVNET-POOL-PRICE).
+ */
+export const PRICE_UPDATE = new PublicKey(
+  process.env.NEXT_PUBLIC_PRICE_UPDATE ?? "2SicEErwKeJkYv3ZUL35axMrGxqeKKUqsq3K7UH88Jrf"
+);
+
 /** The Orca Whirlpool program. Public, stable, same address on every cluster. */
 export const WHIRLPOOL_PROGRAM_ID = new PublicKey(
   "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"

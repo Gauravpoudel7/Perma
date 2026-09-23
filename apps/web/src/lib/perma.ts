@@ -16,6 +16,7 @@ import {
   LEG_LONG,
   LEG_SHORT,
   PERMA_PROGRAM_ID,
+  PRICE_UPDATE,
   WHIRLPOOL_PROGRAM_ID,
 } from "./constants";
 import {
@@ -187,14 +188,16 @@ export interface MintLongArgs {
   tickUpper: number;
   liquidity: bigint;
   nonce: bigint;
+  /** Read for its spot price only: the oracle deviation check (ADR-0004). */
+  whirlpool: PublicKey;
   /** Every one of the owner's currently OPEN long PermaPosition accounts. */
   existingOpenLongs: { pubkey: PublicKey }[];
 }
 
 /**
  * `mint_position`. SHORT requires the full Orca account set and a
- * position-mint signer. LONG passes `null` for all 15 Orca-specific fields
- * and needs no extra signer — `remainingAccounts` must be exactly the
+ * position-mint signer. LONG passes `null` for 14 Orca-specific fields (it
+ * keeps `whirlpool` for the oracle spot check) and needs no extra signer — `remainingAccounts` must be exactly the
  * owner's existing open longs, or the tx fails `MissingOpenLong`.
  */
 export async function buildMintPositionIx(
@@ -255,12 +258,13 @@ export async function buildMintPositionIx(
         whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
+        priceUpdate: PRICE_UPDATE,
       })
       .signers([args.positionMint])
       .instruction();
   }
 
-  // LONG: every Orca-specific account is null; no position-mint signer.
+  // LONG: every Orca-specific account but `whirlpool` is null; no position-mint signer.
   return program.methods
     .mintPosition(
       LEG_LONG,
@@ -280,7 +284,7 @@ export async function buildMintPositionIx(
       premiumIndex,
       rangeState,
       rangeVault,
-      whirlpool: null,
+      whirlpool: args.whirlpool,
       orcaPosition: null,
       positionMint: null,
       positionTokenAccount: null,
@@ -298,6 +302,7 @@ export async function buildMintPositionIx(
       whirlpoolProgram: null,
       systemProgram: SystemProgram.programId,
       rent: SYSVAR_RENT_PUBKEY,
+      priceUpdate: PRICE_UPDATE,
     })
     .remainingAccounts(openLongsToRemainingAccounts(args.existingOpenLongs))
     .instruction();

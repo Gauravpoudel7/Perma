@@ -24,6 +24,7 @@ import {
   ComputeBudgetProgram,
 } from "@solana/web3.js";
 import { assert } from "chai";
+import { freshPrice } from "./oracle-mock";
 
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const PERMA_WHIRLPOOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -143,7 +144,7 @@ describe("position-long: inventory-gated long mint", () => {
   }
   type P = ReturnType<typeof posSet>;
 
-  const mintAccounts = (p: P, range: PublicKey, lo: number, hi: number) => ({
+  const mintAccounts = async (p: P, range: PublicKey, lo: number, hi: number) => ({
     owner: me,
     market,
     marketAuthority,
@@ -170,12 +171,13 @@ describe("position-long: inventory-gated long mint", () => {
     whirlpoolProgram: WHIRLPOOL_PROGRAM,
     systemProgram: SystemProgram.programId,
     rent: SYSVAR_RENT_PUBKEY,
+    priceUpdate: await freshPrice(provider),
   });
 
-  const mintShort = (p: P, l = SHORT_L) =>
+  const mintShort = async (p: P, l = SHORT_L) =>
     program.methods
       .mintPosition(LEG_SHORT, TICK_LOWER, TICK_UPPER, l, MAX_A, MAX_B, new BN(p.nonce))
-      .accounts(mintAccounts(p, demoRange, TICK_LOWER, TICK_UPPER))
+      .accounts(await mintAccounts(p, demoRange, TICK_LOWER, TICK_UPPER))
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
       .signers([p.positionMint])
       .rpc();
@@ -243,8 +245,8 @@ describe("position-long: inventory-gated long mint", () => {
       // `Option` on the program side) and no position-mint signer - that is
       // what makes room for the open-long set as remaining accounts.
       .accounts({
-        ...mintAccounts(p, range, lo, hi),
-        whirlpool: null, orcaPosition: null, positionMint: null, positionTokenAccount: null,
+        ...await mintAccounts(p, range, lo, hi),
+        orcaPosition: null, positionMint: null, positionTokenAccount: null,
         tokenMintA: null, tokenMintB: null, vaultA: null, vaultB: null,
         orcaVaultA: null, orcaVaultB: null, tickArrayLower: null, tickArrayUpper: null,
         associatedTokenProgram: null, memoProgram: null, whirlpoolProgram: null,

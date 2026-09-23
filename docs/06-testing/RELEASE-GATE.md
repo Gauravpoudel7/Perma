@@ -14,6 +14,10 @@
 | **Next** | Protocol V1 **P1** (production hardening) per [`docs/09-post-mvp/ROADMAP.md`](../09-post-mvp/ROADMAP.md). Do **not** reopen Fair scope. |
 | **Honesty** | Prototype. Not audited. Single pool. Not production mainnet risk capital. |
 
+## Protocol V1 P3 (oracle gate) — **PASSED on localnet** (2026-09-23)
+
+**122 passing / 0 failing** (114 + 8 in `tests/oracle-risk.ts`), forward twice and reversed on one fresh ledger; unit **75**; indexer **20/20**; web `yarn test` **75** + `check-copy` clean; reconcile and monitor clean. Report: [`IMPL-P3-ORACLE-RISK-REPORT.md`](../audits/IMPL-P3-ORACLE-RISK-REPORT.md). Devnet is blocked on P3-DEVNET-POOL-PRICE ([ADR-0004](../adr/ADR-0004-oracle-and-price-aware-risk.md)).
+
 **Checklist notes (Fair honesty):** S1–S5, A1–A3, Q1, Q3 met by the green suites above. Q2 anti-slop remains an ongoing UI bar. E1/E2: localnet product loop (deposit → short → long → portfolio) verified by hand; Fair has **no mark P&L** ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)) — UI shows positions, collateral, and premium, not CEX-style P&L%. Devnet full `E2E-DEMO-SCRIPT` remains optional ops polish, not a Fair reopen.
 
 ---
@@ -83,6 +87,12 @@ The Whirlpool program is **not** in the local validator by default. Every test i
 ```bash
 # cwd: $REPO — generate the fixtures first; they are keyed to your wallet.
 node scripts/make-fixtures.mjs
+
+# P3 (ADR-0004): build the localnet-only mock Pyth receiver. It lives outside the
+# Anchor workspace so `anchor keys sync` never rewrites its id; the script refuses
+# to start without it.
+cargo build-sbf --arch v0 --tools-version v1.57 \
+  --manifest-path tests/mock-pyth-receiver/Cargo.toml --sbf-out-dir target/mock
 
 # Then start the validator. Run in a dedicated terminal and leave it running,
 # or pass --detach to background it and wait for the Orca clone to land.
@@ -171,11 +181,11 @@ npx ts-mocha -p ./tsconfig.json -t 1000000 \
   tests/adapter.ts tests/adapter-liquidity.ts tests/collateral.ts \
   tests/factory.ts tests/position-short.ts tests/position-long.ts \
   tests/settle-premium.ts tests/risk-solvency.ts \
-  tests/admin-transfer.ts tests/range-unwind.ts \
+  tests/admin-transfer.ts tests/range-unwind.ts tests/oracle-risk.ts \
   tests/pause-admin.ts tests/events.ts
 ```
 
-Expected: **114 passing, 0 failing** (76 through component 09 + 7 in `tests/admin-transfer.ts` + 5 in `tests/range-unwind.ts` + 17 in `tests/pause-admin.ts` + 9 in `tests/events.ts`). The two P1 suites (Protocol V1 — `transfer_admin`, `unwind_empty_range`) go before `pause-admin.ts`; they self-heal the same way, and `admin-transfer.ts` hands `GlobalConfig.admin` back to the provider wallet in an unconditional `after()`. This covers gates **S1–S5** below. `pause-admin.ts` and `events.ts` go **last** in the forward list: both self-heal (unpause + restore risk defaults + burn what they opened) in their own `before()`/`after()`, so the reversed pass — where they run first — also stays clean.
+Expected: **122 passing, 0 failing** (76 through component 09 + 7 in `tests/admin-transfer.ts` + 5 in `tests/range-unwind.ts` + 8 in `tests/oracle-risk.ts` + 17 in `tests/pause-admin.ts` + 9 in `tests/events.ts`). Every minting suite refreshes the tag-0 mock price itself (`tests/oracle-mock.ts`); `oracle-risk.ts` pauses/unpauses and restores that price in a `finally`, so it self-heals like the P1 suites. The two P1 suites (Protocol V1 — `transfer_admin`, `unwind_empty_range`) go before `pause-admin.ts`; they self-heal the same way, and `admin-transfer.ts` hands `GlobalConfig.admin` back to the provider wallet in an unconditional `after()`. This covers gates **S1–S5** below. `pause-admin.ts` and `events.ts` go **last** in the forward list: both self-heal (unpause + restore risk defaults + burn what they opened) in their own `before()`/`after()`, so the reversed pass — where they run first — also stays clean.
 
 > `tests/factory-rewards.ts` is **excluded on purpose** and needs its own `--reset`
 > ledger: it allowlists a different pool, so running it alongside makes every other
@@ -216,7 +226,7 @@ Vectors are defined in [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) and 
 yarn test:unit          # = cargo test -p perma --lib
 ```
 
-Expected: **67 passing** (66 as of component 11, plus `validate_new_admin`'s `rejects_default_pubkey_as_new_admin` from P1). The vector tests by name:
+Expected: **75 passing** (66 as of component 11, plus `validate_new_admin`'s `rejects_default_pubkey_as_new_admin` from P1, plus 8 `oracle::tests` from P3). The vector tests by name:
 
 | Test | Covers | Needs the pool? |
 |---|---|---|
@@ -265,7 +275,7 @@ with `--reset` to get the real comparison.
 
 ```bash
 # cwd: $REPO/apps/web
-yarn test               # vitest: 50 cases, incl. 11 indexer-client refusal cases
+yarn test               # vitest: 75 cases (as of P3), incl. 11 indexer-client refusal cases
 yarn check-copy         # banned-phrase list, COPY-DECK.md §5
 yarn typecheck
 yarn test:e2e           # Playwright: 47 passing, 4 skipped (webkit screenshot set)
@@ -339,7 +349,7 @@ Sign off only with a real artifact per row — a transaction signature, or the t
 | E2 | UI shows live P&L and accrued premium matching on-chain state | §6 |
 | Q1 | The banner `Prototype. Not audited. Single pool. Not production mainnet risk capital.` is visible on **every** page, verbatim and non-dismissible | [`COPY-DECK.md`](../04-ui-ux/COPY-DECK.md) §1 |
 | Q2 | All screens pass the anti-slop review, including the banned-phrase list | [`UI-QA-CHECKLIST.md`](../04-ui-ux/UI-QA-CHECKLIST.md), `COPY-DECK.md` §5 |
-| Q3 | `yarn test:unit` green (67), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
+| Q3 | `yarn test:unit` green (75), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
 
 **The gate passes only when every row above passes.** A partial pass is a FAIL.
 

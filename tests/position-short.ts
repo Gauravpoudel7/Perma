@@ -26,6 +26,7 @@ import {
 } from "@solana/web3.js";
 import * as chai from "chai";
 import { assert } from "chai";
+import { freshPrice } from "./oracle-mock";
 
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const PERMA_WHIRLPOOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -155,7 +156,7 @@ describe("position-short: deposit -> mint SHORT -> burn (product path)", () => {
 
   type P = ReturnType<typeof positionSet>;
 
-  const mint = (p: P, leg = LEG_SHORT, maxA = MAX_A, maxB = MAX_B) =>
+  const mint = async (p: P, leg = LEG_SHORT, maxA = MAX_A, maxB = MAX_B) =>
     program.methods
       .mintPosition(leg, TICK_LOWER, TICK_UPPER, LIQUIDITY, maxA, maxB, new BN(p.nonce))
       .accounts({
@@ -185,6 +186,7 @@ describe("position-short: deposit -> mint SHORT -> burn (product path)", () => {
         whirlpoolProgram: WHIRLPOOL_PROGRAM,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
+        priceUpdate: await freshPrice(provider),
       })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
       .signers([p.positionMint])

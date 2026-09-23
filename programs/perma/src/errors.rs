@@ -183,4 +183,20 @@ pub enum PermaError {
     /// liquidity, or a short still has an unfunded premium claim against it.
     #[msg("Range still has inventory or an unfunded premium claim")]
     RangeNotEmpty,
+
+    // --- P3 oracle (appended; on-chain codes 6037+), ADR-0004 ---
+    /// `price_update` is not a Full-verified Pyth `PriceUpdateV2` for SOL/USD
+    /// owned by the receiver, or its price/exponent is unusable.
+    #[msg("Reference price account is missing or invalid")]
+    OracleUnavailable,
+    /// The reference price is older than `oracle::MAX_STALENESS_SECS`.
+    #[msg("Reference price is stale")]
+    OracleStale,
+    /// Pyth confidence exceeds `oracle::MAX_CONF_BPS` of the price.
+    #[msg("Reference price confidence is too wide")]
+    OracleConfidenceTooWide,
+    /// Whirlpool spot is more than `oracle::MAX_DEVIATION_BPS` from the
+    /// reference - a manipulated or drifted pool.
+    #[msg("Pool spot deviates too far from the reference price")]
+    OracleDeviationTooHigh,
 }

@@ -13,6 +13,7 @@ pub mod adapter;
 pub mod collateral;
 pub mod errors;
 pub mod factory;
+pub mod oracle;
 pub mod position;
 pub mod premium;
 pub mod risk;
@@ -617,6 +618,19 @@ pub mod perma {
             PermaError::InvalidLegType
         );
         require!(liquidity > 0, PermaError::ZeroAmount);
+
+        // ADR-0004: new exposure opens only at a pool spot near a fresh,
+        // confident reference. Both legs pass `whirlpool` for this read.
+        {
+            let wp = ctx.accounts.whirlpool.as_ref().ok_or(PermaError::InvalidAsset)?;
+            require_keys_eq!(
+                wp.key(),
+                ctx.accounts.market.whirlpool,
+                PermaError::WhirlpoolNotAllowlisted
+            );
+            let pool = load_whirlpool(wp)?;
+            oracle::check_mint_price(&ctx.accounts.price_update, get_sqrt_price_x64(&pool))?;
+        }
 
         // --- Shared prefix: advance the clock, then attribute the elapsed
         // period at the weights that were in force during it. MUST precede any
@@ -2320,6 +2334,8 @@ pub struct MintPosition<'info> {
     // a long mint measured 1188 B - room for ONE remaining account, and a mint
     // paid for by a different fee payer was already over the limit. The SHORT
     // branch requires every one of them; see `MintShortAccounts::resolve`.
+    // Exception: `whirlpool` is passed by BOTH legs since ADR-0004 - the
+    // oracle gate reads its spot.
     /// CHECK: validated against `market.whirlpool`.
     #[account(mut)]
     pub whirlpool: Option<UncheckedAccount<'info>>,
@@ -2369,6 +2385,12 @@ pub struct MintPosition<'info> {
     pub whirlpool_program: Option<UncheckedAccount<'info>>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+
+    /// Pyth `PriceUpdateV2` for SOL/USD, both legs (ADR-0004). Required, not
+    /// `Option`: a mint without a reference fails closed.
+    /// CHECK: owner, discriminator, verification level and feed id are
+    /// validated in `oracle::load_price_update`.
+    pub price_update: UncheckedAccount<'info>,
 }
 
 /// Accounts for [`perma::settle_premium`].

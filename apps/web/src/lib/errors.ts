@@ -48,6 +48,12 @@ export const PERMA_ERROR_COPY: Record<string, string> = {
   MissingOpenLong: "Your open positions changed since this was prepared. Please retry.",
   TooManyOpenLongs: "You've reached the maximum of 8 open longs.",
   InvalidRiskParams: "Those risk parameters would overflow the margin bound.",
+  OracleUnavailable: "The reference price is unavailable, so new positions can't open. Closing still works.",
+  OracleStale: "The reference price is out of date, so new positions can't open. Try again shortly.",
+  OracleConfidenceTooWide:
+    "The reference price is too uncertain right now, so new positions can't open. Try again shortly.",
+  OracleDeviationTooHigh:
+    "The pool price is too far from the reference price, so new positions can't open. Try again shortly.",
 };
 
 export interface ParsedPermaError {

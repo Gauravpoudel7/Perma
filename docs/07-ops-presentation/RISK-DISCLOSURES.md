@@ -12,7 +12,9 @@ As an unaudited prototype, the program may contain bugs or vulnerabilities that 
 PERMA relies on the Orca Whirlpool program. Any vulnerability or downtime in the Orca protocol directly impacts PERMA's ability to function.
 
 ### 3. Oracle Risk
-PERMA performs **no price-based risk check** in Fair MVP; Orca's spot tick is read only for range alignment, and Orca Whirlpool exposes no TWAP. This means there is nothing for a price manipulation to trigger — but also that a short's collateral can lose value through impermanent loss with no on-chain response.
+PERMA's **solvency and settlement read no price**; Orca's spot tick is read only for range alignment, and Orca Whirlpool exposes no TWAP. This means there is nothing for a price manipulation to trigger — but also that a short's collateral can lose value through impermanent loss with no on-chain response.
+
+Since P3 ([ADR-0004](../adr/ADR-0004-oracle-and-price-aware-risk.md)), opening a position (short or long) additionally requires a fresh, confident Pyth SOL/USD price close to the pool's own price. If that price is stale, too uncertain, or far from the pool, **new positions cannot open** until it recovers. Closing positions, settling premium and withdrawing never depend on it. The check treats devUSDC as USD 1:1, and it is a gate only — it does not value collateral, and there is still no liquidation.
 
 ### 4. Liquidity Risk
 Long positions require corresponding Short liquidity. If no shorts are provided for a specific range, Longs cannot be opened.

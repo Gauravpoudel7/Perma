@@ -168,6 +168,7 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
           tickUpper,
           liquidity,
           nonce,
+          whirlpool: WHIRLPOOL,
           existingOpenLongs: freshOpenLongs,
         });
         const longSig = await send([mintIx], { successMessage: "Position opened." });

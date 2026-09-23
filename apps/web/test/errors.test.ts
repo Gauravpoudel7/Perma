@@ -14,6 +14,8 @@ const ALL_VARIANTS = [
   "UnexpectedRemainingAccounts", "SlippageExceeded", "ClosePositionNotEmpty",
   "InvalidRange", "InvalidAsset", "MathOverflow", "InvalidWhirlpoolAccount",
   "InsolventMint", "MissingOpenLong", "TooManyOpenLongs", "InvalidRiskParams",
+  // P3 (ADR-0004). The P1 admin-only errors are not user-facing, so not listed.
+  "OracleUnavailable", "OracleStale", "OracleConfidenceTooWide", "OracleDeviationTooHigh",
 ];
 
 describe("PERMA_ERROR_COPY", () => {
@@ -24,8 +26,8 @@ describe("PERMA_ERROR_COPY", () => {
     }
   });
 
-  it("has exactly 35 entries — no stray or duplicate keys", () => {
-    expect(Object.keys(PERMA_ERROR_COPY).length).toBe(35);
+  it("has exactly 39 entries — no stray or duplicate keys", () => {
+    expect(Object.keys(PERMA_ERROR_COPY).length).toBe(39);
     expect(Object.keys(PERMA_ERROR_COPY).sort()).toEqual([...ALL_VARIANTS].sort());
   });
 });

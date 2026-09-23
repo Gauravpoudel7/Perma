@@ -35,6 +35,7 @@ import {
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import { assert, AssertionError } from "chai";
+import { freshPrice } from "./oracle-mock";
 
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const PERMA_WHIRLPOOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -177,7 +178,7 @@ describe("settle-premium: the cash path (component 08)", () => {
   }
   type P = ReturnType<typeof posSet>;
 
-  const mintAccounts = (p: P, lo: number, hi: number) => ({
+  const mintAccounts = async (p: P, lo: number, hi: number) => ({
     owner: me,
     market,
     marketAuthority,
@@ -204,12 +205,13 @@ describe("settle-premium: the cash path (component 08)", () => {
     whirlpoolProgram: WHIRLPOOL_PROGRAM,
     systemProgram: SystemProgram.programId,
     rent: SYSVAR_RENT_PUBKEY,
+    priceUpdate: await freshPrice(provider),
   });
 
-  const mintShort = (p: P, lo = TICK_LOWER, hi = TICK_UPPER, l = SHORT_L) =>
+  const mintShort = async (p: P, lo = TICK_LOWER, hi = TICK_UPPER, l = SHORT_L) =>
     program.methods
       .mintPosition(LEG_SHORT, lo, hi, l, MAX_A, MAX_B, new BN(p.nonce))
-      .accounts(mintAccounts(p, lo, hi))
+      .accounts(await mintAccounts(p, lo, hi))
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
       .signers([p.positionMint])
       .rpc();
@@ -229,8 +231,8 @@ describe("settle-premium: the cash path (component 08)", () => {
     program.methods
       .mintPosition(LEG_LONG, lo, hi, size, new BN(0), new BN(0), new BN(p.nonce))
       .accounts({
-        ...mintAccounts(p, lo, hi),
-        whirlpool: null, orcaPosition: null, positionMint: null, positionTokenAccount: null,
+        ...await mintAccounts(p, lo, hi),
+        orcaPosition: null, positionMint: null, positionTokenAccount: null,
         tokenMintA: null, tokenMintB: null, vaultA: null, vaultB: null,
         orcaVaultA: null, orcaVaultB: null, tickArrayLower: null, tickArrayUpper: null,
         associatedTokenProgram: null, memoProgram: null, whirlpoolProgram: null,

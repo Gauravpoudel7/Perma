@@ -62,6 +62,7 @@ async function main() {
     tickUpper: -38168,
     liquidity,
     nonce,
+    whirlpool: WHIRLPOOL,
     existingOpenLongs,
   });
 

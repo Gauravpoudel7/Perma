@@ -74,6 +74,13 @@ address = "ACkArMv6JBtNTM64qLYnNirkMyWgYHUJ9x6CMbLPKZGy"
 # and filled by the real deposit_collateral instruction. devUSDC cannot be
 # minted locally, so these are hand-crafted SPL accounts (the MINT is untouched).
 # Regenerate per-machine with: node scripts/make-fixtures.mjs
+# ADR-0004: mock Pyth receiver at the REAL receiver address, localnet only.
+# Build: cargo build-sbf --arch v0 --tools-version v1.57 \
+#   --manifest-path tests/mock-pyth-receiver/Cargo.toml --sbf-out-dir target/mock
+[[test.genesis]]
+address = "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ"
+program = "target/mock/mock_pyth_receiver.so"
+
 [[test.validator.account]]
 address = "J93MdzNbVkKHBh3KwWwS7Y7CjqtqfFHwd1zHgFgw3UZQ"
 filename = "tests/fixtures/user-a.json"

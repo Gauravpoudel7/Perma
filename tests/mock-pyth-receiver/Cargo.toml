@@ -1,0 +1,27 @@
+# Localnet-only stand-in for the Pyth Solana Receiver (ADR-0004).
+#
+# Standalone on purpose: its own [workspace] keeps it out of `programs/*`, so
+# `anchor keys sync` never rewrites its declare_id!, and it is never deployed
+# to devnet. Loaded at the real receiver address by scripts/local-validator.sh.
+[package]
+name = "mock-pyth-receiver"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "mock_pyth_receiver"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "1.2.0", features = ["init-if-needed"] }
+
+[profile.release]
+overflow-checks = true
+
+[workspace]

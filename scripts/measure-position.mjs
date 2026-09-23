@@ -2,6 +2,7 @@ import anchor from "@coral-xyz/anchor";
 import BN from "bn.js";
 import { PublicKey, Keypair, SystemProgram, SYSVAR_RENT_PUBKEY, ComputeBudgetProgram } from "@solana/web3.js";
 import { readFileSync } from "fs";
+import { postFreshPrice } from "./mock-price.mjs";
 const { AnchorProvider, Program, Wallet, web3 } = anchor;
 const WP=new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const POOL=new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -48,7 +49,8 @@ const acct={owner:kp.publicKey,market,marketAuthority:auth,userCollateral:ucol,p
  whirlpool:POOL,orcaPosition:orcaPos,positionMint:mint.publicKey,positionTokenAccount:posAta,
  tokenMintA:WSOL,tokenMintB:USDC,vaultA:VA,vaultB:VB,orcaVaultA:OVA,orcaVaultB:OVB,
  tickArrayLower:ta(LOW),tickArrayUpper:ta(UP),tokenProgram:TOK,associatedTokenProgram:ATA,
- memoProgram:MEMO,whirlpoolProgram:WP,systemProgram:SystemProgram.programId,rent:SYSVAR_RENT_PUBKEY};
+ memoProgram:MEMO,whirlpoolProgram:WP,systemProgram:SystemProgram.programId,rent:SYSVAR_RENT_PUBKEY,
+ priceUpdate:await postFreshPrice(conn,kp)};  // ADR-0004 oracle gate (localnet mock)
 // Top up free balance so the measured mints are not refused for lack of collateral
 // (the suites drain and refill the shared ledger). Capped by what the fixture ATAs hold.
 {const USER_A=new PublicKey("J93MdzNbVkKHBh3KwWwS7Y7CjqtqfFHwd1zHgFgw3UZQ"),USER_B=new PublicKey("A728HNbbk6AjiqTsqNt5FbD7cz7xNpeXrx35qetgLcmX");
@@ -60,7 +62,7 @@ const acct={owner:kp.publicKey,market,marketAuthority:auth,userCollateral:ucol,p
 const m=await go(program.methods.mintPosition(0,LOW,UP,new BN(100000000),new BN(1e9),new BN(1e8),nonce)
   .accounts(acct).preInstructions([ComputeBudgetProgram.setComputeUnitLimit({units:400000})]).signers([mint]),[mint]);
 console.log(`mint_position   ${m.size} bytes / 1232   ${m.n} accounts   ${m.cu} CU`);
-const {associatedTokenProgram,systemProgram,rent,...bacct}=acct;
+const {associatedTokenProgram,systemProgram,rent,priceUpdate,...bacct}=acct;
 const b=await go(program.methods.burnPosition(new BN(0),new BN(0))
   .accounts(bacct).preInstructions([ComputeBudgetProgram.setComputeUnitLimit({units:600000})]));
 console.log(`burn_position   ${b.size} bytes / 1232   ${b.n} accounts   ${b.cu} CU`);
@@ -70,7 +72,7 @@ console.log(`burn_position   ${b.size} bytes / 1232   ${b.n} accounts   ${b.cu} 
 const lnonce=new BN(Date.now()%1e9+7);
 const lpos=PublicKey.findProgramAddressSync([Buffer.from("perma_position"),market.toBuffer(),
   kp.publicKey.toBuffer(),lnonce.toArrayLike(Buffer,"le",8)],program.programId)[0];
-const LONG_NULLS={whirlpool:null,orcaPosition:null,positionMint:null,positionTokenAccount:null,tokenMintA:null,tokenMintB:null,vaultA:null,vaultB:null,orcaVaultA:null,orcaVaultB:null,tickArrayLower:null,tickArrayUpper:null,associatedTokenProgram:null,memoProgram:null,whirlpoolProgram:null};
+const LONG_NULLS={orcaPosition:null,positionMint:null,positionTokenAccount:null,tokenMintA:null,tokenMintB:null,vaultA:null,vaultB:null,orcaVaultA:null,orcaVaultB:null,tickArrayLower:null,tickArrayUpper:null,associatedTokenProgram:null,memoProgram:null,whirlpoolProgram:null};
 const l0=await go(program.methods.mintPosition(1,LOW,UP,new BN(1000000),new BN(0),new BN(0),lnonce)
   .accounts({...acct,permaPosition:lpos,...LONG_NULLS}).remainingAccounts([])
   .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({units:400000})]));

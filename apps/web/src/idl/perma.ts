@@ -1832,6 +1832,14 @@ export type Perma = {
         {
           "name": "rent",
           "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "priceUpdate",
+          "docs": [
+            "Pyth `PriceUpdateV2` for SOL/USD, both legs (ADR-0004). Required, not",
+            "`Option`: a mint without a reference fails closed.",
+            "validated in `oracle::load_price_update`."
+          ]
         }
       ],
       "args": [
@@ -3537,6 +3545,26 @@ export type Perma = {
       "code": 6036,
       "name": "rangeNotEmpty",
       "msg": "Range still has inventory or an unfunded premium claim"
+    },
+    {
+      "code": 6037,
+      "name": "oracleUnavailable",
+      "msg": "Reference price account is missing or invalid"
+    },
+    {
+      "code": 6038,
+      "name": "oracleStale",
+      "msg": "Reference price is stale"
+    },
+    {
+      "code": 6039,
+      "name": "oracleConfidenceTooWide",
+      "msg": "Reference price confidence is too wide"
+    },
+    {
+      "code": 6040,
+      "name": "oracleDeviationTooHigh",
+      "msg": "Pool spot deviates too far from the reference price"
     }
   ],
   "types": [

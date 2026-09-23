@@ -196,6 +196,27 @@ Narrow same-array case `[-39184, -39104]` -> `ACkArMv6JBtNTM64qLYnNirkMyWgYHUJ9x
 | Array derivation | `i32::div_euclid`, seeds from `start.to_string().as_bytes()` |
 | Required token amounts | computed from Whirlpool liquidity math for the live pool |
 
+## 7. Oracle Vectors — P3 ([ADR-0004](../adr/ADR-0004-oracle-and-price-aware-risk.md))
+
+`tests/oracle-risk.ts` (8) plus the boundary unit tests in `programs/perma/src/oracle.rs`. Localnet only: `tests/mock-pyth-receiver` is loaded at the real receiver address `rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ` and writes `PriceUpdateV2` accounts at PDA `["price_feed", feed_id, [tag]]`. Tag 0 is the shared healthy feed every minting suite refreshes (`tests/oracle-mock.ts` `freshPrice`, `scripts/mock-price.mjs`); each unhealthy vector uses its own tag.
+
+The cloned pool's spot cannot be moved on localnet, so every gap is created on the **reference** side. The check only measures `|spot − price|`, so this exercises the same branch a pumped pool would.
+
+| ID | Setup | Expect |
+|---|---|---|
+| `ORACLE_HEALTHY_OK` | price = pool spot, conf 0.1 %, age 0 | SHORT mint succeeds (then burned) |
+| `ORACLE_STALE_FAIL` | age 90 s | `OracleStale`, SHORT and LONG |
+| `ORACLE_CONF_WIDE_FAIL` | conf 1.01 % | `OracleConfidenceTooWide` |
+| `ORACLE_DEVIATION_FAIL` | price = spot ± 2.05 % | `OracleDeviationTooHigh` (SHORT above, LONG below) |
+| `ORACLE_SPOT_SPIKE_FAIL` | spot 50 % above the reference | `OracleDeviationTooHigh` |
+| `ORACLE_UNAVAILABLE_FAIL` | non-receiver owner; wrong feed id; `Partial` verification; LONG without `whirlpool` | `OracleUnavailable` ×3; `InvalidAsset` |
+| `ORACLE_PAUSE_INTERACTION` | market paused and tag 0 stale | mint `MarketPaused`; withdraw and burn succeed; unpause + fresh price restored |
+| `ORACLE_FAIR_HORIZON_REGRESSION` | — | `tests/risk-solvency.ts` passes with only its mint builder changed |
+| `ORACLE_NO_ORCA_PDA_TWAP` | static scan of `programs/perma/src` (non-comment lines) | no `volatility_accumulator`, `b"oracle"`, `get_oracle_address`, `accounts::Oracle`, `Oracle::` |
+| `ORACLE_RING_GAP_FAIL` | — | **N/A** — no PERMA observation ring (option C deferred) |
+
+Every rejected vector also asserts the `perma_position` PDA was not created.
+
 ---
 
 **🚩 STATUS:** Prototype. Not audited. Single pool. Not production mainnet risk capital.

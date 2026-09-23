@@ -10,6 +10,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# ADR-0004: the mock Pyth receiver is loaded at the real receiver address.
+# Refuse to start without it - otherwise every mint fails OracleUnavailable and
+# the oracle rejection tests pass for the wrong reason.
+MOCK_PYTH=target/mock/mock_pyth_receiver.so
+if [[ ! -f "$MOCK_PYTH" ]]; then
+  echo "missing $MOCK_PYTH - build it first:" >&2
+  echo "  cargo build-sbf --arch v0 --tools-version v1.57 --manifest-path tests/mock-pyth-receiver/Cargo.toml --sbf-out-dir target/mock" >&2
+  exit 1
+fi
+
 pkill -f solana-test-validator 2>/dev/null || true
 sleep 1
 rm -rf test-ledger
@@ -33,6 +43,7 @@ ARGS=(
   --account A728HNbbk6AjiqTsqNt5FbD7cz7xNpeXrx35qetgLcmX tests/fixtures/user-b.json
   --account 3umaZKmQYDM2xbduPAa6LQWwj7Ngh4X6ZTRoNCfzNDdY tests/fixtures/vault-a.json
   --account HNR1XRJoG6gLPDfk5Hwz8p5S7PTihFZkvHrsdxGWaYWR tests/fixtures/vault-b.json
+  --bpf-program rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ "$MOCK_PYTH"   # mock Pyth receiver
 )
 
 if [[ "${1:-}" == "--detach" ]]; then

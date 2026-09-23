@@ -33,6 +33,7 @@ import {
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import { assert, AssertionError } from "chai";
+import { freshPrice } from "./oracle-mock";
 
 /**
  * Every send in this suite confirms at `confirmed`, and so does every
@@ -140,7 +141,7 @@ describe("range-unwind: empty-range residue sweep (P1)", () => {
   /** Not the admin: signs to earn `Unauthorized`. */
   const stranger = Keypair.generate();
 
-  const mintAccounts = (p: P) => ({
+  const mintAccounts = async (p: P) => ({
     owner: p.owner,
     market,
     marketAuthority,
@@ -167,6 +168,7 @@ describe("range-unwind: empty-range residue sweep (P1)", () => {
     whirlpoolProgram: WHIRLPOOL_PROGRAM,
     systemProgram: SystemProgram.programId,
     rent: SYSVAR_RENT_PUBKEY,
+    priceUpdate: await freshPrice(provider),
   });
 
   const openLongsOf = async (owner: PublicKey) => {
@@ -179,10 +181,10 @@ describe("range-unwind: empty-range residue sweep (P1)", () => {
       .map((x: any) => ({ pubkey: x.publicKey, isSigner: false, isWritable: false }));
   };
 
-  const mintShort = (p: P) =>
+  const mintShort = async (p: P) =>
     program.methods
       .mintPosition(LEG_SHORT, TICK_LOWER, TICK_UPPER, SHORT_L, MAX_A, MAX_B, new BN(p.nonce))
-      .accounts(mintAccounts(p))
+      .accounts(await mintAccounts(p))
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
       .signers([p.positionMint])
       .rpc(CONFIRMED);
@@ -191,8 +193,8 @@ describe("range-unwind: empty-range residue sweep (P1)", () => {
     program.methods
       .mintPosition(LEG_LONG, TICK_LOWER, TICK_UPPER, size, new BN(0), new BN(0), new BN(p.nonce))
       .accounts({
-        ...mintAccounts(p),
-        whirlpool: null, orcaPosition: null, positionMint: null, positionTokenAccount: null,
+        ...await mintAccounts(p),
+        orcaPosition: null, positionMint: null, positionTokenAccount: null,
         tokenMintA: null, tokenMintB: null, vaultA: null, vaultB: null,
         orcaVaultA: null, orcaVaultB: null, tickArrayLower: null, tickArrayUpper: null,
         associatedTokenProgram: null, memoProgram: null, whirlpoolProgram: null,
