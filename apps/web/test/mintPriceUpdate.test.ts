@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Connection, Keypair, type PublicKey } from "@solana/web3.js";
 import { mintExpectsPriceUpdate, PRICE_UPDATE, WHIRLPOOL } from "../src/lib/constants";
-import { buildMintPositionIx, getPermaProgram, type PermaWallet } from "../src/lib/perma";
+import { buildBurnPositionIx, buildMintPositionIx, buildSettlePremiumIx, getPermaProgram, type PermaWallet } from "../src/lib/perma";
 
 function freshKey(): PublicKey {
   return Keypair.generate().publicKey;
@@ -119,6 +119,64 @@ describe("buildMintPositionIx price_update gate", () => {
     const priceAt = kept.keys.findIndex((k) => k.pubkey.equals(PRICE_UPDATE));
     expect(priceAt).toBeGreaterThanOrEqual(0);
     expect(kept.keys[priceAt + 1]?.pubkey.equals(openLong)).toBe(true);
+  });
+
+  it("uses a caller-supplied post_update account", async () => {
+    const posted = freshKey();
+    const { owner, adapter } = wallet();
+    const ix = await buildMintPositionIx(
+      programFor(adapter),
+      {
+        leg: "short",
+        owner: owner.publicKey,
+        market: freshKey(),
+        tickLower: 16,
+        tickUpper: 24,
+        liquidity: 1_000_000n,
+        tokenMaxA: 1n,
+        tokenMaxB: 1n,
+        nonce: 1n,
+        whirlpool: WHIRLPOOL,
+        tokenMintA: freshKey(),
+        tokenMintB: freshKey(),
+        vaultA: freshKey(),
+        vaultB: freshKey(),
+        orcaVaultA: freshKey(),
+        orcaVaultB: freshKey(),
+        tickArrayLower: freshKey(),
+        tickArrayUpper: freshKey(),
+        positionMint: Keypair.generate(),
+      },
+      { expectsPriceUpdate: true, priceUpdate: posted }
+    );
+    expect(ix.keys.at(-1)?.pubkey.equals(posted)).toBe(true);
+    expect(hasPriceUpdate(ix.keys)).toBe(0);
+  });
+
+  it("keeps burn and settle free of price_update", async () => {
+    const { owner, adapter } = wallet();
+    const program = programFor(adapter);
+    const market = freshKey();
+    const burn = await buildBurnPositionIx(program, {
+      leg: "long",
+      owner: owner.publicKey,
+      market,
+      nonce: 1n,
+      tickLower: 16,
+      tickUpper: 24,
+      vaultB: freshKey(),
+    });
+    const settle = await buildSettlePremiumIx(program, {
+      cranker: owner.publicKey,
+      owner: owner.publicKey,
+      market,
+      nonce: 1n,
+      tickLower: 16,
+      tickUpper: 24,
+      vaultB: freshKey(),
+    });
+    expect(hasPriceUpdate(burn.keys)).toBe(0);
+    expect(hasPriceUpdate(settle.keys)).toBe(0);
   });
 
   it("follows NEXT_PUBLIC_CLUSTER when the caller does not override", async () => {

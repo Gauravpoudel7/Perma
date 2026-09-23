@@ -208,11 +208,12 @@ export interface MintLongArgs {
  */
 function omitMintPriceUpdateAccount(
   ix: TransactionInstruction,
-  remainingCount: number
+  remainingCount: number,
+  priceUpdate: PublicKey
 ): TransactionInstruction {
   const index = ix.keys.length - remainingCount - 1;
   const meta = ix.keys[index];
-  if (!meta || !meta.pubkey.equals(PRICE_UPDATE)) {
+  if (!meta || !meta.pubkey.equals(priceUpdate)) {
     throw new Error(
       "mint_position did not place price_update last among named accounts; refusing to drop a different account."
     );
@@ -234,11 +235,12 @@ function omitMintPriceUpdateAccount(
  * `price_update` is included only when `mintExpectsPriceUpdate()` is true
  * (localnet P3, or Solana-devnet after `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`).
  * Solana-devnet defaults to omitting it until that program is upgraded.
+ * Pass `opts.priceUpdate` when a prior `post_update` created a fresh account.
  */
 export async function buildMintPositionIx(
   program: Program<Perma>,
   args: MintShortArgs | MintLongArgs,
-  opts?: { expectsPriceUpdate?: boolean }
+  opts?: { expectsPriceUpdate?: boolean; priceUpdate?: PublicKey }
 ) {
   const [marketAuthority] = marketAuthorityPda(args.market);
   const [userCollateral] = userCollateralPda(args.market, args.owner);
@@ -247,6 +249,7 @@ export async function buildMintPositionIx(
   const [rangeState] = rangeStatePda(args.market, args.tickLower, args.tickUpper);
   const [rangeVault] = rangeVaultPda(args.market, args.tickLower, args.tickUpper);
   const expectsPriceUpdate = opts?.expectsPriceUpdate ?? mintExpectsPriceUpdate();
+  const priceUpdate = opts?.priceUpdate ?? PRICE_UPDATE;
 
   if (args.leg === "short") {
     const [orcaPosition] = orcaPositionPda(args.positionMint.publicKey);
@@ -295,11 +298,11 @@ export async function buildMintPositionIx(
         whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
-        priceUpdate: PRICE_UPDATE,
+        priceUpdate,
       })
       .signers([args.positionMint])
       .instruction();
-    return expectsPriceUpdate ? ix : omitMintPriceUpdateAccount(ix, 0);
+    return expectsPriceUpdate ? ix : omitMintPriceUpdateAccount(ix, 0, priceUpdate);
   }
 
   // LONG: every Orca-specific account but `whirlpool` is null; no position-mint signer.
@@ -340,13 +343,13 @@ export async function buildMintPositionIx(
       whirlpoolProgram: null,
       systemProgram: SystemProgram.programId,
       rent: SYSVAR_RENT_PUBKEY,
-      priceUpdate: PRICE_UPDATE,
+      priceUpdate,
     })
     .remainingAccounts(openLongsToRemainingAccounts(args.existingOpenLongs))
     .instruction();
   return expectsPriceUpdate
     ? ix
-    : omitMintPriceUpdateAccount(ix, args.existingOpenLongs.length);
+    : omitMintPriceUpdateAccount(ix, args.existingOpenLongs.length, priceUpdate);
 }
 
 // --- burn ----------------------------------------------------------------

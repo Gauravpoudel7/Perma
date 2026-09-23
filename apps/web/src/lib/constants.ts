@@ -43,19 +43,42 @@ export const WHIRLPOOL = new PublicKey(
 );
 
 /**
- * Pyth `PriceUpdateV2` (SOL/USD) for a P3 `mint_position` (ADR-0004).
- * Defaults to the localnet mock receiver's tag-0 feed, kept fresh by
- * `node scripts/mock-price.mjs --loop`.
- *
- * Solana-devnet mints omit this account until that program is upgraded to P3.
- * The deployed program is still pre-P3: the allowlisted pool trades far from
- * real SOL/USD, so the upgrade is blocked
- * (docs/audits/P3-DEVNET-POOL-PRICE.md). `mintExpectsPriceUpdate` decides
- * whether a mint includes this key.
+ * Localnet mock receiver tag-0 feed. Kept fresh by `node scripts/mock-price.mjs --loop`.
+ * Never deploy this account, or the mock program, to Solana-devnet (ADR-0004).
  */
-export const PRICE_UPDATE = new PublicKey(
-  process.env.NEXT_PUBLIC_PRICE_UPDATE ?? "2SicEErwKeJkYv3ZUL35axMrGxqeKKUqsq3K7UH88Jrf"
-);
+export const LOCALNET_MOCK_PRICE_UPDATE_ADDRESS = "2SicEErwKeJkYv3ZUL35axMrGxqeKKUqsq3K7UH88Jrf";
+
+/**
+ * Pyth's sponsored SOL/USD `PriceUpdateV2` on Solana-devnet: push-oracle PDA
+ * `[shard 0, feed id]` under `pythWSnsw…`, owned by the receiver `rec5EKM…`.
+ * ADR-0004 feed id. It is often older than 60s, so a P3 mint posts a fresh
+ * full-verification update when this account is stale (`lib/pythUpdate.ts`).
+ */
+export const DEVNET_SOL_USD_PRICE_UPDATE_ADDRESS = "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE";
+
+/**
+ * Which `PriceUpdateV2` address a build uses when the caller does not pass one.
+ *
+ * `NEXT_PUBLIC_PRICE_UPDATE` wins when it is non-empty. Otherwise Solana-devnet
+ * uses the sponsored SOL/USD feed and every other cluster uses the localnet mock.
+ * `process.env.NEXT_PUBLIC_*` is a static property access so Next inlines it.
+ */
+export function defaultPriceUpdateAddress(
+  cluster: string = process.env.NEXT_PUBLIC_CLUSTER ?? "localnet",
+  override: string | undefined = process.env.NEXT_PUBLIC_PRICE_UPDATE
+): string {
+  const chosen = override?.trim();
+  if (chosen) return chosen;
+  return cluster === "devnet" ? DEVNET_SOL_USD_PRICE_UPDATE_ADDRESS : LOCALNET_MOCK_PRICE_UPDATE_ADDRESS;
+}
+
+/**
+ * Pyth `PriceUpdateV2` (SOL/USD) for a P3 `mint_position` (ADR-0004).
+ * `mintExpectsPriceUpdate` decides whether a mint includes this key.
+ * On Solana-devnet with the flag on, `resolveMintPriceUpdate` may replace it
+ * with a `post_update` account posted in an earlier transaction.
+ */
+export const PRICE_UPDATE = new PublicKey(defaultPriceUpdateAddress());
 
 /**
  * Whether `mint_position` must include the P3 `price_update` account.
@@ -67,10 +90,11 @@ export const PRICE_UPDATE = new PublicKey(
  * (6024) before the transaction lands. Localnet runs the P3 program, so
  * localnet mints keep the account.
  *
- * Default: include on every cluster except `devnet`. After the Solana-devnet
- * program is upgraded to P3, set `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`
- * and point `NEXT_PUBLIC_PRICE_UPDATE` at a real posted feed. `=0` forces
- * the pre-P3 account list on any cluster (including localnet).
+ * Default: include on every cluster except `devnet`. The live Solana-devnet
+ * program is still pre-P3 until the operator runs `scripts/upgrade-devnet-p3.mjs`
+ * (`docs/audits/IMPL-P3-DEVNET-UPGRADE.md`). After that upgrade, set
+ * `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`. `=0` forces the pre-P3 account
+ * list on any cluster (including localnet).
  *
  * `process.env.NEXT_PUBLIC_*` is read as a static property access so Next
  * inlines it into the client bundle. See the note on `requireEnv`.

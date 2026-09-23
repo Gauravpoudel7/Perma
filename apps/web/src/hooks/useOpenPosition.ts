@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Keypair } from "@solana/web3.js";
+import { Keypair, type TransactionInstruction } from "@solana/web3.js";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { useSendPermaTx, fetchFreshOpenLongs } from "./useSendPermaTx";
 import { usePermaProgram } from "./usePermaProgram";
@@ -19,6 +19,8 @@ import { slippageCappedTokenMax } from "../lib/liquidityMath";
 import { canMintLong, estPremiumPerHour, requiredMargin } from "../lib/solvency";
 import { tickToPrice } from "../lib/whirlpool";
 import { WHIRLPOOL, MAX_OPEN_LONGS } from "../lib/constants";
+import { resolveMintPriceUpdate } from "../lib/pythUpdate";
+import { useToastStore } from "../store/useToastStore";
 
 // Demo pool: WSOL (9 decimals) / devUSDC (6 decimals).
 const DECIMALS_A = 9;
@@ -69,6 +71,7 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
   const setSizeInput = useTradeFormStore((s) => s.setSizeInput);
   const rangeState = useRangeStateValue(tickLower, tickUpper);
   const [busy, setBusy] = useState(false);
+  const push = useToastStore((s) => s.push);
 
   let liquidity: bigint | null = null;
   try {
@@ -107,7 +110,22 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
   async function handleOpen() {
     if (!publicKey || !market || !marketPubkey || !liquidity) return;
     setBusy(true);
+    let closeIxs: TransactionInstruction[] = [];
+    let opened = false;
     try {
+      const price = await resolveMintPriceUpdate({
+        connection,
+        payer: publicKey,
+        sendTx: (ixs, signers, successMessage) => send(ixs, { successMessage, extraSigners: signers }),
+      });
+      closeIxs = price.closeIxs;
+      if (!price.ok || !price.priceUpdate) {
+        if (!price.alreadyToasted && price.error) {
+          push({ variant: "error", message: price.error });
+        }
+        return;
+      }
+
       const [marketAuthority] = marketAuthorityPda(marketPubkey);
       const nonce = BigInt(Date.now());
 
@@ -138,6 +156,12 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
                 market.tickSpacing
               )
             : [];
+        // A P3 short mint has 43 bytes of headroom. The tick-array rent, when
+        // it is due, goes in the transaction before the mint.
+        if (tickArrayIxs.length > 0) {
+          const rentSig = await send(tickArrayIxs, { successMessage: "Tick array created." });
+          if (!rentSig) return;
+        }
 
         const mintIx = await buildMintPositionIx(program, {
           leg: "short",
@@ -151,13 +175,16 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
           nonce,
           ...orcaAccounts,
           positionMint,
-        });
+        }, { priceUpdate: price.priceUpdate });
 
-        const shortSig = await send([...tickArrayIxs, mintIx], {
+        const shortSig = await send([mintIx], {
           successMessage: "Position opened.",
           extraSigners: [positionMint],
         });
-        if (shortSig) setSizeInput("");
+        if (shortSig) {
+          opened = true;
+          setSizeInput("");
+        }
       } else {
         const freshOpenLongs = await fetchFreshOpenLongs(program, connection, marketPubkey, publicKey);
         const mintIx = await buildMintPositionIx(program, {
@@ -170,11 +197,28 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
           nonce,
           whirlpool: WHIRLPOOL,
           existingOpenLongs: freshOpenLongs,
-        });
+        }, { priceUpdate: price.priceUpdate });
         const longSig = await send([mintIx], { successMessage: "Position opened." });
-        if (longSig) setSizeInput("");
+        if (longSig) {
+          opened = true;
+          setSizeInput("");
+        }
       }
+    } catch (err) {
+      console.error("[useOpenPosition]", err);
+      push({
+        variant: "error",
+        message: err instanceof Error ? err.message : "The mint was not sent.",
+      });
     } finally {
+      if (closeIxs.length > 0) {
+        await send(closeIxs, {
+          successMessage: "Pyth update account closed.",
+          failureSuffix: opened
+            ? "The position is open. Pyth rent was not reclaimed."
+            : "Pyth rent was not reclaimed.",
+        });
+      }
       setBusy(false);
     }
   }
