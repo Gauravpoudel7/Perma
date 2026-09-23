@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  isSettleable,
+  SETTLE_DUST_USDC_MICRO,
   estPremiumPerHour,
   requiredMargin,
   projectedIndex,
@@ -110,5 +112,24 @@ describe("estPremiumPerHour", () => {
     // 1 unit: 9e12 / 1e12 = 9 exactly; 1/9000 of that floors to 0 — an estimate never rounds up.
     expect(estPremiumPerHour(market, 1n)).toBe(9n);
     expect(estPremiumPerHour({ premiumRate: 1n, premiumMultiplier: 1n }, 1n)).toBe(0n);
+  });
+});
+
+describe("isSettleable", () => {
+  it("offers Settle only from the dust floor up", () => {
+    expect(isSettleable(0n)).toBe(false);
+    expect(isSettleable(1n)).toBe(false);
+    expect(isSettleable(999n)).toBe(false);
+    expect(isSettleable(1_000n)).toBe(true);
+    expect(isSettleable(1_001n)).toBe(true);
+    expect(isSettleable(9_000_000n)).toBe(true);
+  });
+
+  it("keeps the floor above zero, so a settleable amount can never be hidden entirely", () => {
+    expect(SETTLE_DUST_USDC_MICRO).toBeGreaterThanOrEqual(1n);
+    // The floor must stay far below an hour of rent on a real position.
+    expect(SETTLE_DUST_USDC_MICRO).toBeLessThan(
+      estPremiumPerHour({ premiumRate: 1_000_000n, premiumMultiplier: 1_000n }, 1_000_000n)
+    );
   });
 });

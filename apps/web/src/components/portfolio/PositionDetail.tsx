@@ -8,6 +8,7 @@ import { CloseSettleAction } from "./CloseSettleAction";
 import { usePositionSummary } from "../../hooks/usePositionSummary";
 import { useTradeFormStore } from "../../store/useTradeFormStore";
 import { formatBaseUnits, truncateAddress } from "../../lib/format";
+import { SETTLE_DUST_USDC_MICRO } from "../../lib/solvency";
 import { explorerAddressUrl } from "../../lib/explorer";
 import type { PositionWithPubkey } from "../../lib/accounts";
 
@@ -46,7 +47,7 @@ function Body({ position, onClose }: { position: PositionWithPubkey; onClose: ()
       subtitle="Premium accrues continuously and settles when you close."
       onClose={onClose}
       initialFocusRef={copyRef}
-      footer={<CloseSettleAction position={position} hasAccrued={s.accrued > 0n} />}
+      footer={<CloseSettleAction position={position} hasAccrued={s.canSettle} />}
     >
       <dl className="flex flex-col gap-4">
         <Row label="Side" value={s.sideLabel} mono={false} />
@@ -57,7 +58,16 @@ function Body({ position, onClose }: { position: PositionWithPubkey; onClose: ()
         />
         <Row label="Position size" value={`${s.liquidity.toString()} liquidity units`} />
         <Row label="Status" value={<Badge tone={s.pending ? "warning" : "neutral"}>{s.statusLabel}</Badge>} mono={false} />
-        <Row label="Accrued premium" value={`Est. ${formatBaseUnits(s.accrued, DECIMALS_B, 6)} USDC`} />
+        <Row
+          label="Accrued premium"
+          value={`Est. ${formatBaseUnits(s.accrued, DECIMALS_B, 6)} USDC`}
+          // The number is always the real one; only the Settle action has a floor.
+          hint={
+            s.isLong && s.accrued > 0n && s.accrued < SETTLE_DUST_USDC_MICRO
+              ? "Below the settle threshold; closing settles it."
+              : undefined
+          }
+        />
         <Row
           label="Position account"
           value={

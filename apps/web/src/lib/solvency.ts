@@ -57,6 +57,23 @@ export function estPremiumPerHour(
   return (market.premiumRate * liquidity * market.premiumMultiplier * SLOTS_PER_HOUR) / PREMIUM_SCALE;
 }
 
+/**
+ * Below this estimated amount, offering "Settle" is noise rather than a
+ * choice: `settle_premium` leaves the long open, so it starts accruing again
+ * at once and a button reappears for a rounding tail — which reads as though
+ * the settle failed. 0.001 USDC is 1000x the smallest representable amount and
+ * far below any real hourly rent (at the deployed rate a 1e6 position owes
+ * ~9 USDC/hour), so this can only ever hide a tail, never rent. Display-only:
+ * `Close` still settles whatever is owed, and the program keeps its own
+ * `NothingToSettle` guard.
+ */
+export const SETTLE_DUST_USDC_MICRO = 1_000n;
+
+/** The one place the UI decides whether "Settle" is worth showing. */
+export function isSettleable(accruedUsdcMicro: bigint): boolean {
+  return accruedUsdcMicro >= SETTLE_DUST_USDC_MICRO;
+}
+
 export interface PremiumIndexFields {
   currentIndex: bigint;
   lastUpdateSlot: bigint;

@@ -116,7 +116,8 @@ Screens follow [`WIREFRAMES.md`](WIREFRAMES.md).
 | Columns | "Side" · "Range" · "Size" · "Accrued Premium" · "Status" — **no "P&L" column**: no P&L instruction exists on-chain; a short's realized LP result is applied once, at close, and a long always closes at P&L = 0 ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)) |
 | Premium column note | "Premium accrues continuously and settles when you close." Values shown are labeled "Est." |
 | Status values | "Open" · "Pending Premium" (a short's claim outran the escrow, carried until a long settles) |
-| Row action | "Close" (short, or a long with nothing owed) · "Settle" (a long with a positive accrued amount — routes to `settle_premium`, not burn) |
+| Row action | "Close" (short, or a long owing less than the settle floor) · "Settle" (a long whose estimated owed premium is at least **0.001 USDC** — routes to `settle_premium`, not burn). `settle_premium` leaves the long open, so it accrues again immediately; the floor stops a 0.000001 USDC tail from re-offering the button as though the settle had failed. Close always settles whatever is owed, at burn. |
+| Detail sheet, accrued below the floor | "Below the settle threshold; closing settles it." — the estimated amount itself is always shown in full |
 | Empty state | "No open positions. Open a short to provide liquidity, or a long to buy against existing short inventory." |
 | Closing | "Settling premium…" |
 | Closed | "Position closed. Premium settled to collateral. View transaction" |

@@ -89,6 +89,8 @@ export function CloseSettleAction({
     }
   }
 
+  // `hasAccrued` is `usePositionSummary.canSettle` — a long owing at least
+  // `SETTLE_DUST_USDC_MICRO`. The leg check stays as a belt to that brace.
   const showSettle = position.legType === LEG_LONG && hasAccrued;
 
   return (

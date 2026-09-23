@@ -44,7 +44,7 @@ export const PositionRow = forwardRef<
           <Button ref={detailsRef} variant="secondary" onClick={onSelect}>
             Details
           </Button>
-          <CloseSettleAction position={position} hasAccrued={s.accrued > 0n} />
+          <CloseSettleAction position={position} hasAccrued={s.canSettle} />
         </div>
       </Cell>
     </TableRow>

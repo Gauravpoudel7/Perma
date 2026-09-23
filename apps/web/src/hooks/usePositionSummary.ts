@@ -2,7 +2,7 @@
 
 import { useChainStore } from "../store/useChainStore";
 import { useRangeState } from "./useRangeState";
-import { payableIfSettledNow, projectedIndex, shortAccruedPremium } from "../lib/solvency";
+import { isSettleable, payableIfSettledNow, projectedIndex, shortAccruedPremium } from "../lib/solvency";
 import { tickToPrice } from "../lib/whirlpool";
 import { LEG_LONG, STATUS_PENDING_PREMIUM } from "../lib/constants";
 import type { PositionWithPubkey } from "../lib/accounts";
@@ -19,6 +19,8 @@ export interface PositionSummary {
   liquidity: bigint;
   /** Display-only "Accrued Premium (Est.)" in µUSDC; see the math note below. */
   accrued: bigint;
+  /** Whether to offer "Settle": a long owing at least `SETTLE_DUST_USDC_MICRO`. The only producer of that answer. */
+  canSettle: boolean;
   pending: boolean;
   statusLabel: "Open" | "Pending Premium";
 }
@@ -79,6 +81,7 @@ export function usePositionSummary(position: PositionWithPubkey): PositionSummar
     highPrice: tickToPrice(position.tickUpper, DECIMALS_A, DECIMALS_B),
     liquidity: BigInt(position.liquidity.toString()),
     accrued,
+    canSettle: isLong && isSettleable(accrued),
     pending,
     statusLabel: pending ? "Pending Premium" : "Open",
   };
