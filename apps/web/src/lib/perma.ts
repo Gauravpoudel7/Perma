@@ -5,6 +5,7 @@ import {
   PublicKey,
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
+  TransactionInstruction,
   type AccountMeta,
   type Transaction,
   type VersionedTransaction,
@@ -15,6 +16,7 @@ import type { Perma } from "../idl/perma";
 import {
   LEG_LONG,
   LEG_SHORT,
+  mintExpectsPriceUpdate,
   PERMA_PROGRAM_ID,
   PRICE_UPDATE,
   WHIRLPOOL_PROGRAM_ID,
@@ -195,14 +197,48 @@ export interface MintLongArgs {
 }
 
 /**
+ * Drop the P3 `price_update` meta so the instruction matches a pre-P3
+ * `mint_position` (the program on Solana-devnet today).
+ *
+ * The committed IDL lists `price_update` as required and last among named
+ * accounts, so Anchor will not build the instruction without it. That extra
+ * meta is what the pre-P3 program rejects as `remaining_accounts` (6024).
+ * LONG open-long metas are appended after the named accounts and must stay.
+ * Refuse to remove anything that is not `PRICE_UPDATE`.
+ */
+function omitMintPriceUpdateAccount(
+  ix: TransactionInstruction,
+  remainingCount: number
+): TransactionInstruction {
+  const index = ix.keys.length - remainingCount - 1;
+  const meta = ix.keys[index];
+  if (!meta || !meta.pubkey.equals(PRICE_UPDATE)) {
+    throw new Error(
+      "mint_position did not place price_update last among named accounts; refusing to drop a different account."
+    );
+  }
+  const keys = ix.keys.filter((_, i) => i !== index);
+  return new TransactionInstruction({
+    programId: ix.programId,
+    keys,
+    data: ix.data,
+  });
+}
+
+/**
  * `mint_position`. SHORT requires the full Orca account set and a
  * position-mint signer. LONG passes `null` for 14 Orca-specific fields (it
  * keeps `whirlpool` for the oracle spot check) and needs no extra signer — `remainingAccounts` must be exactly the
  * owner's existing open longs, or the tx fails `MissingOpenLong`.
+ *
+ * `price_update` is included only when `mintExpectsPriceUpdate()` is true
+ * (localnet P3, or Solana-devnet after `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`).
+ * Solana-devnet defaults to omitting it until that program is upgraded.
  */
 export async function buildMintPositionIx(
   program: Program<Perma>,
-  args: MintShortArgs | MintLongArgs
+  args: MintShortArgs | MintLongArgs,
+  opts?: { expectsPriceUpdate?: boolean }
 ) {
   const [marketAuthority] = marketAuthorityPda(args.market);
   const [userCollateral] = userCollateralPda(args.market, args.owner);
@@ -210,6 +246,7 @@ export async function buildMintPositionIx(
   const [premiumIndex] = premiumIndexPda(args.market);
   const [rangeState] = rangeStatePda(args.market, args.tickLower, args.tickUpper);
   const [rangeVault] = rangeVaultPda(args.market, args.tickLower, args.tickUpper);
+  const expectsPriceUpdate = opts?.expectsPriceUpdate ?? mintExpectsPriceUpdate();
 
   if (args.leg === "short") {
     const [orcaPosition] = orcaPositionPda(args.positionMint.publicKey);
@@ -221,7 +258,7 @@ export async function buildMintPositionIx(
       ],
       ATA_PROGRAM_ID
     );
-    return program.methods
+    const ix = await program.methods
       .mintPosition(
         LEG_SHORT,
         args.tickLower,
@@ -262,10 +299,11 @@ export async function buildMintPositionIx(
       })
       .signers([args.positionMint])
       .instruction();
+    return expectsPriceUpdate ? ix : omitMintPriceUpdateAccount(ix, 0);
   }
 
   // LONG: every Orca-specific account but `whirlpool` is null; no position-mint signer.
-  return program.methods
+  const ix = await program.methods
     .mintPosition(
       LEG_LONG,
       args.tickLower,
@@ -306,6 +344,9 @@ export async function buildMintPositionIx(
     })
     .remainingAccounts(openLongsToRemainingAccounts(args.existingOpenLongs))
     .instruction();
+  return expectsPriceUpdate
+    ? ix
+    : omitMintPriceUpdateAccount(ix, args.existingOpenLongs.length);
 }
 
 // --- burn ----------------------------------------------------------------
