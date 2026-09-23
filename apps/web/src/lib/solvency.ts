@@ -180,3 +180,19 @@ export function shortAccruedPremium(
   const claimable = ((range.accPremiumPerShortQ64 - pos.entryAccQ64) * pos.liquidity) >> 64n;
   return (claimable < 0n ? 0n : claimable) + pos.premiumReceivable;
 }
+
+/**
+ * What `settle_premium` would pay this short right now, in µUSDC.
+ *
+ * Mirrors `premium::claim_short_amount`: owed is the uncapped entitlement
+ * (`shortAccruedPremium`), and `paid = min(owed, premium_pool)`. A result of
+ * 0 is `NothingToSettle` — the escrow has no USDC for this claim yet. The
+ * U9 dust floor does not apply here; the program's own gate is `paid > 0`.
+ */
+export function shortPayableNow(
+  pos: ShortPositionFields,
+  range: ShortRangeFields & { premiumPool: bigint }
+): bigint {
+  const owed = shortAccruedPremium(pos, range);
+  return owed < range.premiumPool ? owed : range.premiumPool;
+}

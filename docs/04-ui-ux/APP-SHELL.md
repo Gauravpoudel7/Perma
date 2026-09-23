@@ -24,9 +24,9 @@ The app uses a **Fixed Side-Nav** and a **Main Stage** approach, similar to Line
 
 ### 2. Portfolio View
 - **Active Positions Table** (`components/portfolio/PositionsTable.tsx`, full stage width):
-    - Side | Range | Size | Accrued Premium (Est.) | Status (Open / Pending Premium) | Action: [Details] [Close] / [Settle].
+    - Side | Range | Size | Accrued Premium (Est.) | Status (Open / Pending Premium) | Action: [Details] [Close] / [Settle]. A Pending Premium short does not get Close (`burn_position` requires Open). It gets Settle when the range escrow can pay, or the waiting line from COPY-DECK when it cannot.
     - Below `md` the header hides and every row lays out as a card with a caption label per cell — the same `<table>` element restyled, so cards and table read one set of facts from one view-model (`hooks/usePositionSummary.ts`).
-- **Position sheet** (`PositionDetail.tsx`, on `primitives/SlideOver.tsx` — the same panel the Trade ReviewSheet uses: scrim, 1px left border, Esc, focus trap, focus returned to the row's Details button): side, realized range + ticks, size, status, accrued premium (Est.), position account (copy + explorer), "Open a similar position on Trade" (prefills the ticket via the trade form store), and the unchanged `CloseSettleAction` in the footer. No P&L, mark, health or solvency figure — none exists on-chain for Fair.
+- **Position sheet** (`PositionDetail.tsx`, on `primitives/SlideOver.tsx` — the same panel the Trade ReviewSheet uses: scrim, 1px left border, Esc, focus trap, focus returned to the row's Details button): side, realized range + ticks, size, status, accrued premium (Est.), position account (copy + explorer), "Open a similar position on Trade" (prefills the ticket via the trade form store), and the same `CloseSettleAction` as the row in the footer. Pending Premium uses its own sub-line (liquidity already withdrawn). No P&L, mark, health or solvency figure — none exists on-chain for Fair.
 - **History** (indexer, cash facts only): Event · Detail · When (block time when indexed, "—" otherwise) · Slot · Transaction. Loading / not configured / degraded / empty are the shared States, never invented rows.
     - **No P&L column.** No P&L instruction exists on-chain — a short's realized LP result
       (`returned − locked`) is applied once, at close, and a long always closes at P&L = 0

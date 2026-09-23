@@ -9,6 +9,7 @@ import { usePositionSummary } from "../../hooks/usePositionSummary";
 import { useTradeFormStore } from "../../store/useTradeFormStore";
 import { formatBaseUnits, truncateAddress } from "../../lib/format";
 import { SETTLE_DUST_USDC_MICRO } from "../../lib/solvency";
+import { PENDING_PREMIUM_SHEET_SUBTITLE } from "../../lib/positionActions";
 import { explorerAddressUrl } from "../../lib/explorer";
 import type { PositionWithPubkey } from "../../lib/accounts";
 
@@ -16,8 +17,8 @@ const DECIMALS_B = 6;
 
 /**
  * The slide-over a row opens. Same facts as the row, plus the position
- * account itself and a way back to the ticket. Close / Settle are the
- * unchanged `CloseSettleAction`. There is no P&L, mark, or health figure
+ * account itself and a way back to the ticket. Close / Settle are the same
+ * `CloseSettleAction` as the row. There is no P&L, mark, or health figure
  * here because none exists on-chain for Fair (ADR-0003).
  */
 export function PositionDetail({ position, onClose }: { position: PositionWithPubkey | null; onClose: () => void }) {
@@ -44,10 +45,14 @@ function Body({ position, onClose }: { position: PositionWithPubkey; onClose: ()
     <SlideOver
       open
       title="Position"
-      subtitle="Premium accrues continuously and settles when you close."
+      subtitle={
+        s.pending
+          ? PENDING_PREMIUM_SHEET_SUBTITLE
+          : "Premium accrues continuously and settles when you close."
+      }
       onClose={onClose}
       initialFocusRef={copyRef}
-      footer={<CloseSettleAction position={position} hasAccrued={s.canSettle} />}
+      footer={<CloseSettleAction position={position} actions={s.actions} shortPayable={s.shortPayable} />}
     >
       <dl className="flex flex-col gap-4">
         <Row label="Side" value={s.sideLabel} mono={false} />
