@@ -120,15 +120,15 @@ suite fails fast in its `before` hook.
 |---|---|
 | `whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc` | Whirlpool program (same ID on devnet and mainnet) |
 | `FcrweFY1G9HJAHG5inkGB6pKg1HZ6x9UC2WioAfWrGkR` | `WhirlpoolsConfig`, devnet |
-| `2WUgXb…ym9G` | **The allowlisted SOL/devUSDC Whirlpool** (`tick_spacing = 8`) |
-| `3uyTv2…DGh4` / `63GvSv…DT5C` | its `token_vault_a` / `token_vault_b` |
+| `2WUgXb…ym9G` | **The allowlisted SOL/devUSDC Whirlpool** (`tick_spacing = 8`), snapshot `tests/fixtures/pool.json` |
+| `3uyTv2…DGh4` / `63GvSv…DT5C` | its `token_vault_a` / `token_vault_b`, snapshots `pool-vault-a/b.json` |
 | `So1111…1112` / `BRjpCH…ok1k` | WSOL and devUSDC mints |
-| `86pYzh…H571` / `49ixSQ…cFPv` | TickArrays for the demo range (starts `-40832`, `-38720`) |
-| `ACkArM…KZGy` | TickArray `-39424`, the narrow same-array case |
+| `86pYzh…H571` / `49ixSQ…cFPv` | TickArrays for the demo range (starts `-40832`, `-38720`), snapshots |
+| `ACkArM…KZGy` | TickArray `-39424`, the narrow same-array case, snapshot |
 | `EgxU92…EiZ4` | a devnet pool with **active reward emissions** — proves the factory's allowlist check fires before its rewards check (`tests/factory*.ts`) |
 | `3KBZiL…HvPt` | a real devnet pool that is **not** allowlisted (`tests/adapter.ts`) |
 
-> **Known regression since 2026-09-25 (open, needs a decision).** `--clone 2WUg…` copies the pool's *live* devnet state. The pool was moved to Pyth (~$117, tick ~−21449) by P3-DEVNET-POOL-PRICE, so on a **fresh** ledger the 18–22 demo range sits below spot and a short there takes devUSDC only. Measured on a fresh clone (2026-09-25): **117 passing / 5 failing**. The failures are the WSOL assertions in `tests/adapter-liquidity.ts` (add, partial remove, slippage cap) and `tests/position-short.ts` (mint locks WSOL, two concurrent shorts). The program is not at fault. A ledger cloned before 2026-09-25 still gives 122/0. Fix options: pin the pool and its two vaults as `--account` JSON snapshots at ~$20 (recommended: tests stop depending on devnet drift), or retarget the fixture range around the live spot and clone the matching TickArrays.
+> **Pool frozen as a snapshot (2026-09-25).** `--clone 2WUg…` used to copy the pool's *live* devnet state. P3-DEVNET-POOL-PRICE moved that pool to Pyth (~$117), which left the 18–22 demo range below spot; a fresh ledger then gave 117 passing / 5 failing on WSOL assertions. The pool, its two vaults and the three TickArrays are now `--account` snapshots (`tests/fixtures/pool.json`, `pool-vault-a/b.json`, `tick-array-m40832/m38720/m39424.json`), dumped from a ledger at **$19.97** (tick −39140). Measured on a fresh ledger: **122 / 0** forward and reversed. Re-dump only from a ~$20 ledger, never from live devnet.
 
 TickArrays must be cloned too, or every liquidity call fails with `TickArrayNotInitialized`. The three above cover the demo range on the allowlisted pool — see [`01-clmm-adapter-orca.md`](../02-mvp-components/01-clmm-adapter-orca.md) §C.3a for the derivation.
 

@@ -21,7 +21,10 @@ wallet = "~/.config/solana/id.json"
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 
-# Orca Whirlpool program + the allowlisted devnet pool, cloned for integration tests.
+# Orca Whirlpool program cloned for integration tests. The allowlisted pool, its
+# vaults and TickArrays are FROZEN snapshots at ~$19.97 (tests/fixtures/pool*.json,
+# tick-array-*.json): the live devnet pool moved to ~$117 for P3 and the demo range
+# is 18-22.
 # See docs/06-testing/RELEASE-GATE.md section 3.
 [test.validator]
 url = "https://api.devnet.solana.com"
@@ -32,14 +35,17 @@ address = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
 [[test.validator.clone]]
 address = "FcrweFY1G9HJAHG5inkGB6pKg1HZ6x9UC2WioAfWrGkR"
 
-[[test.validator.clone]]
+[[test.validator.account]]
 address = "2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G"
+filename = "tests/fixtures/pool.json"
 
-[[test.validator.clone]]
+[[test.validator.account]]
 address = "3uyTv2Pi3pb6Gc2emKiYU8gW845M1HeMMyFr2MTrDGh4"
+filename = "tests/fixtures/pool-vault-a.json"
 
-[[test.validator.clone]]
+[[test.validator.account]]
 address = "63GvSvGYTsfesX1kmesdtfxHbBQBsFpZT1wVNhNADT5C"
+filename = "tests/fixtures/pool-vault-b.json"
 
 [[test.validator.clone]]
 address = "So11111111111111111111111111111111111111112"
@@ -48,7 +54,7 @@ address = "So11111111111111111111111111111111111111112"
 address = "BRjpCHtyQLNCo8gqRUr8jtdAj5AjPYQaoqbvcZiHok1k"
 
 # TickArrays covering the demo range (start -40832 / -38720) and the
-# narrow same-array case (-39424). Required by the adapter validation tests.
+# narrow same-array case (-39424) are snapshots too - see the account entries.
 
 # Devnet pool WITH active reward emissions - used to prove the factory's
 # allowlist check fires before the rewards check (tests/factory*.ts).
@@ -61,14 +67,17 @@ address = "EgxU92G34jw6QDG9RuTX9StFg1PmHuDqkRKAE5kVEiZ4"
 [[test.validator.clone]]
 address = "3KBZiL2g8C7tiJ32hTv5v3KM7aK9htpqTw4cTXz1HvPt"
 
-[[test.validator.clone]]
+[[test.validator.account]]
 address = "86pYzhWoHDwaKbYMbM4gNC7EQTQgbv8WTG5rRjVNH571"
+filename = "tests/fixtures/tick-array-m40832.json"
 
-[[test.validator.clone]]
+[[test.validator.account]]
 address = "49ixSQnGC2AEzgwQAeHkDnLYJYKtB2c9rSgpb7PncFPv"
+filename = "tests/fixtures/tick-array-m38720.json"
 
-[[test.validator.clone]]
+[[test.validator.account]]
 address = "ACkArMv6JBtNTM64qLYnNirkMyWgYHUJ9x6CMbLPKZGy"
+filename = "tests/fixtures/tick-array-m39424.json"
 
 # Component 03: the USER's ATAs are funded; the market vaults are emitted EMPTY
 # and filled by the real deposit_collateral instruction. devUSDC cannot be
