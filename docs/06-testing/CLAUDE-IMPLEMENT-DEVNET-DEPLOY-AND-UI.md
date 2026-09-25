@@ -31,7 +31,7 @@
    - `create_market` for that pool
    - Is idempotent / fails clearly if already initialized
 4. Verify: `solana program show <PROGRAM_ID> -u solana-devnet`; market PDA account exists.
-5. Optional but recommended: seed one short in ticks `-40176`/`-38168` (18–22 USDC range) so Trade longs work — follow `mintShort` pattern; document amounts.
+5. Optional but recommended: seed one short in ticks `-40176`/`-38168` (18–22 USDC range, when the pool traded ~$20) so Trade longs work. *Since P3 (2026-09-25) the devnet pool trades ~$117: seed around the live spot tick instead, and only while the pool is within 200 bps of Pyth* — follow `mintShort` pattern; document amounts.
 6. Update `RUNBOOK-DEVNET.md`: remove “not performed yet”; paste exact commands + program id + market pubkey.
 
 ### D2 — UI env + docs (must after D1 green)

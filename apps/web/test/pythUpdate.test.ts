@@ -4,6 +4,7 @@ import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import {
   DEVNET_SOL_USD_PRICE_UPDATE_ADDRESS,
   LOCALNET_MOCK_PRICE_UPDATE_ADDRESS,
+  PERMA_PROGRAM_ID,
   defaultPriceUpdateAddress,
   mintExpectsPriceUpdate,
 } from "../src/lib/constants";
@@ -18,6 +19,8 @@ import {
   WORMHOLE_PROGRAM_ID,
   buildPostUpdatePlan,
   fetchHermesSolUsd,
+  messagePublishTime,
+  resolveMintPriceUpdate,
   mintPostsFreshPyth,
   parseAccumulatorUpdate,
   programDataAddress,
@@ -56,10 +59,11 @@ function accumulator(vaa: Buffer, message: Buffer, proofs: Buffer[]): Buffer {
   ]);
 }
 
-function priceMessage(): Buffer {
-  const message = Buffer.alloc(33);
+function priceMessage(publishTime = 0): Buffer {
+  const message = Buffer.alloc(61);
   message[0] = 0;
   FEED.copy(message, 1);
+  message.writeBigInt64BE(BigInt(publishTime), 53);
   return message;
 }
 
@@ -207,8 +211,77 @@ describe("Hermes accumulator and post_update", () => {
     expect(calls[1]).toContain("ids%5B%5D=0xef0d8b6f");
   });
 
+  it("never lets Next cache the Hermes response", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ binary: { data: [Buffer.from("pyth").toString("base64")] } }), { status: 200 })
+    );
+    await fetchHermesSolUsd({ fetchImpl, apiKey: "test-key" });
+    expect(fetchImpl.mock.calls[0]?.[1]?.cache).toBe("no-store");
+  });
+
   it("names the missing key when every Hermes host refuses", async () => {
     const fetchImpl = vi.fn(async () => new Response("unauthorized", { status: 401 }));
     await expect(fetchHermesSolUsd({ fetchImpl })).rejects.toThrow(/PYTH_API_KEY/);
+  });
+});
+
+describe("resolveMintPriceUpdate on Solana-devnet", () => {
+  const NOW = 1_790_163_650;
+  const vaa = Buffer.alloc(80);
+  vaa[0] = 1;
+  vaa.writeUInt32BE(3, 1);
+  const connection = {
+    getAccountInfo: async (pk: PublicKey) => {
+      // Program account -> program data with a P3-sized ELF; the sponsored feed is missing.
+      if (pk.equals(PERMA_PROGRAM_ID)) {
+        const d = Buffer.alloc(36);
+        d.writeUInt32LE(2, 0);
+        ADMIN.toBuffer().copy(d, 4);
+        return { data: d, owner: PublicKey.default };
+      }
+      if (pk.equals(ADMIN)) {
+        const d = Buffer.alloc(45 + 604_992);
+        d.writeUInt32LE(3, 0);
+        d[12] = 1;
+        return { data: d, owner: PublicKey.default };
+      }
+      return null;
+    },
+    getMinimumBalanceForRentExemption: async () => 1_000_000,
+  } as never;
+
+  function run(publishTime: number) {
+    const sendTx = vi.fn(async () => "sig");
+    const sendTxs = vi.fn(async (_txs: unknown[], _msg: string) => true);
+    const result = resolveMintPriceUpdate({
+      connection,
+      payer: ADMIN,
+      cluster: "devnet",
+      flag: "1",
+      nowSecs: NOW,
+      fetchUpdate: async () => accumulator(vaa, priceMessage(publishTime), [Buffer.alloc(20, 9)]),
+      sendTx,
+      sendTxs,
+    });
+    return { result, sendTx, sendTxs };
+  }
+
+  it("refuses a cached Hermes update before any wallet prompt", async () => {
+    const { result, sendTx, sendTxs } = run(NOW - 120);
+    const r = await result;
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/120 seconds old/);
+    expect(sendTx).not.toHaveBeenCalled();
+    expect(sendTxs).not.toHaveBeenCalled();
+  });
+
+  it("posts a fresh update behind one approval", async () => {
+    const { result, sendTx, sendTxs } = run(NOW - 2);
+    const r = await result;
+    expect(r.ok).toBe(true);
+    expect(sendTxs).toHaveBeenCalledTimes(1);
+    expect(sendTxs.mock.calls[0]?.[0]).toHaveLength(3);
+    expect(sendTx).not.toHaveBeenCalled();
+    expect(messagePublishTime(priceMessage(NOW))).toBe(NOW);
   });
 });

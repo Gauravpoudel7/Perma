@@ -38,7 +38,7 @@ import { useToastStore } from "../store/useToastStore";
  */
 export function useSendPermaTx() {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signAllTransactions } = useWallet();
   const program = usePermaProgram();
   const push = useToastStore((s) => s.push);
   const update = useToastStore((s) => s.update);
@@ -133,7 +133,58 @@ export function useSendPermaTx() {
     [publicKey, connection, program, sendTransaction, push, update, refetchAll, refetchTouched]
   );
 
-  return { send, refetchAll };
+  /**
+   * Several dependent transactions behind one wallet approval (the Pyth post).
+   * They are signed together, then sent and confirmed strictly in order. Wallets
+   * without `signAllTransactions` fall back to one prompt per transaction.
+   */
+  const sendAll = useCallback(
+    async (
+      batches: { ixs: TransactionInstruction[]; signers: Signer[] }[],
+      opts: { successMessage: string }
+    ): Promise<boolean> => {
+      if (!publicKey) throw new Error("Connect a wallet to continue.");
+      if (!signAllTransactions) {
+        for (const b of batches) {
+          if (!(await send(b.ixs, { successMessage: opts.successMessage, extraSigners: b.signers }))) return false;
+        }
+        return true;
+      }
+
+      const toastId = push({ variant: "pending", message: "Confirm in your wallet" });
+      let signature: string | undefined;
+      try {
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        const txs = batches.map((b) => {
+          const tx = new Transaction().add(...b.ixs);
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = publicKey;
+          if (b.signers.length) tx.partialSign(...b.signers);
+          return tx;
+        });
+        const signed = await signAllTransactions(txs);
+        for (const tx of signed) {
+          signature = await connection.sendRawTransaction(tx.serialize());
+          const res = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+          if (res.value.err) throw Object.assign(new Error(JSON.stringify(res.value.err)), { signature });
+        }
+        update(toastId, { variant: "success", message: opts.successMessage, signature });
+        return true;
+      } catch (e) {
+        console.error("[useSendPermaTx]", e);
+        const { message } = parseAnchorError(e);
+        update(toastId, {
+          variant: "error",
+          message: `Transaction failed: ${message}. Nothing was changed.`,
+          signature: (e as { signature?: string })?.signature ?? signature,
+        });
+        return false;
+      }
+    },
+    [publicKey, connection, signAllTransactions, send, push, update]
+  );
+
+  return { send, sendAll, refetchAll };
 }
 
 /** Fresh (never store-cached) open-longs fetch — the only safe source for `remainingAccounts`. */

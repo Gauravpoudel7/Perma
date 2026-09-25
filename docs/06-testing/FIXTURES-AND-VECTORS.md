@@ -132,7 +132,7 @@ Asserts that entitlement accrues on elapsed time rather than on received cash �
 
 There is no `calculate_pnl` and no mark-to-market in Fair MVP, and Orca Whirlpool exposes no TWAP to value against ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)). What *is* live: a short's realized LP result is `returned − locked`, applied exactly once by `position::close_short` at burn and asserted on chain in `tests/position-short.ts` ("final conservation") and `tests/settle-premium.ts`. The intrinsic-value cases below are kept as the Protocol V1 target.
 
-- **Scenario**: Short at range [18, 22] *(the allowlisted pool trades ~20 USDC/SOL)*.
+- **Scenario**: Short at range [18, 22] *(the localnet fixture range; the devnet pool traded ~20 USDC/SOL when it was chosen and has traded ~117 since P3-DEVNET-POOL-PRICE, 2026-09-25)*.
 - **Case A (above range)**: Price → 25 ⇒ `profit = (current − upper) × size`.
 - **Case B (below range)**: Price → 15 ⇒ `loss = (lower − current) × size`.
 

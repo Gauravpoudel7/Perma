@@ -7,7 +7,7 @@ Demonstrate the full perpetual option lifecycle in under 3 minutes.
 
 ### Step 1: Setup (The Operator)
 - **Action**: Call `create_market` for SOL/USDC.
-- **Action**: Open a Short position for range **[$18, $22]** (the pool trades ~20 USDC/SOL; ticks −40176 / −38168) with 100,000,000 liquidity units.
+- **Action**: Open a Short position for a range around spot with 100,000,000 liquidity units. On localnet the fixtures use **[$18, $22]** (ticks −40176 / −38168). On Solana-devnet the pool trades ~117 USDC/SOL since P3 (2026-09-25), so pick a range around the live spot tick (`yarn smoke-devnet-p3` prints one), and first check the pool is within 200 bps of Pyth.
 - **Result**: Market now has "Short Inventory".
 
 ### Step 2: The Buyer (Alice)

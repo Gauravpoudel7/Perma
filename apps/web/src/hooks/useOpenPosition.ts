@@ -55,7 +55,7 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
   const program = usePermaProgram();
-  const { send } = useSendPermaTx();
+  const { send, sendAll } = useSendPermaTx();
   const { canTransact, reason } = useWalletGuard();
   const market = useChainStore((s) => s.market);
   const marketPubkey = useChainStore((s) => s.marketPubkey);
@@ -117,6 +117,7 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
         connection,
         payer: publicKey,
         sendTx: (ixs, signers, successMessage) => send(ixs, { successMessage, extraSigners: signers }),
+        sendTxs: (txs, successMessage) => sendAll(txs, { successMessage }),
       });
       closeIxs = price.closeIxs;
       if (!price.ok || !price.priceUpdate) {

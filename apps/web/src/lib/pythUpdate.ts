@@ -218,6 +218,12 @@ export function solUsdUpdate(parsed: AccumulatorUpdate): { message: Buffer; proo
   return found;
 }
 
+/** `publish_time` of a PriceFeedMessage: type 1 + feed 32 + price 8 + conf 8 + expo 4, then i64 BE. */
+export function messagePublishTime(message: Buffer): number {
+  if (message.length < 61) throw new Error("Pyth price message is too short.");
+  return Number(message.readBigInt64BE(53));
+}
+
 export function splitVaa(vaa: Buffer, first = VAA_FIRST_CHUNK, next = VAA_NEXT_CHUNK): Buffer[] {
   if (vaa.length < 6) throw new Error("Pyth update VAA is too short.");
   const out: Buffer[] = [];
@@ -388,7 +394,9 @@ export async function fetchHermesSolUsd(opts?: {
     url.searchParams.set("encoding", "base64");
     let response: Response;
     try {
-      response = await fetchImpl(url, { headers });
+      // Next 14 caches server `fetch` by default. A cached update is minutes old
+      // and every mint built on it fails the 60 s staleness gate.
+      response = await fetchImpl(url, { headers, cache: "no-store" });
     } catch (err) {
       failures.push(`${base} (${err instanceof Error ? err.message : "request failed"})`);
       continue;
@@ -416,7 +424,7 @@ export async function fetchHermesSolUsd(opts?: {
 }
 
 export async function fetchHermesViaApp(fetchImpl: typeof fetch = fetch): Promise<Buffer> {
-  const response = await fetchImpl("/api/pyth/sol-usd");
+  const response = await fetchImpl("/api/pyth/sol-usd", { cache: "no-store" });
   const body = (await response.json().catch(() => ({}))) as { data?: unknown; error?: unknown };
   if (!response.ok || typeof body.data !== "string" || body.data.length === 0) {
     const detail = typeof body.error === "string" ? body.error : `Hermes proxy failed (${response.status}).`;
@@ -430,6 +438,10 @@ export const PRE_P3_MINT_ERROR =
 
 export const STALE_PYTH_ERROR =
   "The Pyth price on Solana-devnet is older than 60 seconds, and Hermes did not return an update. Set PYTH_API_KEY in apps/web/.env.local (do not commit it) and retry. Nothing was opened.";
+
+export function staleHermesError(ageSecs: number): string {
+  return `Hermes returned a SOL/USD update ${ageSecs} seconds old, and PERMA rejects prices older than ${MAX_STALENESS_SECS}. Nothing was sent. Retry in a moment.`;
+}
 
 export interface MintPriceResult {
   ok: boolean;
@@ -449,6 +461,8 @@ export async function resolveMintPriceUpdate(args: {
   connection: Connection;
   payer: PublicKey;
   sendTx: (ixs: TransactionInstruction[], signers: Signer[], successMessage: string) => Promise<string | null>;
+  /** Optional: send every post transaction behind one wallet approval, in order. */
+  sendTxs?: (txs: SignedIxs[], successMessage: string) => Promise<boolean>;
   cluster?: string;
   flag?: string;
   fetchUpdate?: () => Promise<Buffer>;
@@ -483,11 +497,22 @@ export async function resolveMintPriceUpdate(args: {
     return { ok: false, priceUpdate: null, closeIxs: [], error: detail.includes("PYTH_API_KEY") ? detail : STALE_PYTH_ERROR };
   }
 
+  // Half the on-chain limit: the rest is for signing and the mint itself.
+  const ageSecs = now - messagePublishTime(solUsdUpdate(parseAccumulatorUpdate(bytes)).message);
+  if (ageSecs > MAX_STALENESS_SECS / 2) {
+    return { ok: false, priceUpdate: null, closeIxs: [], error: staleHermesError(ageSecs) };
+  }
+
   const plan = await buildPostUpdatePlan({
     payer: args.payer,
     update: bytes,
     rentLamports: (space) => args.connection.getMinimumBalanceForRentExemption(space),
   });
+  if (args.sendTxs) {
+    const sent = await args.sendTxs(plan.txs, "Pyth price posted.");
+    if (!sent) return { ok: false, priceUpdate: null, closeIxs: plan.closeIxs, alreadyToasted: true };
+    return { ok: true, priceUpdate: plan.priceUpdate, closeIxs: plan.closeIxs };
+  }
   for (let i = 0; i < plan.txs.length; i++) {
     const tx = plan.txs[i];
     if (!tx) continue;
