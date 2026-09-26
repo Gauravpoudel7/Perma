@@ -61,6 +61,9 @@ export const PERMA_ERROR_COPY: Record<string, string> = {
   AccountSolvent: "This account covers its premium and margin, so it can't be liquidated.",
   NotExercisable: "The price isn't far enough outside this long's range to force-exercise it.",
   SelfTarget: "You can't liquidate or force-exercise your own position. Close it instead.",
+  // P5 (ADR-0006).
+  RangeTooNarrow: "Pick a range at least 32 ticks wide (4 tick spacings).",
+  InvalidPremiumParams: "Those premium parameters are out of bounds.",
 };
 
 export interface ParsedPermaError {

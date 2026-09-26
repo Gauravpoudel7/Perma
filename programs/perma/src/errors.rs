@@ -168,7 +168,7 @@ pub enum PermaError {
     #[msg("Too many open longs")]
     TooManyOpenLongs,
     /// `0x35` - `set_market_risk_params` rejected: zero horizon/buffer, or the
-    /// margin for `risk::MARGIN_LIQUIDITY_BOUND` (×`MAX_OPEN_LONGS`) would
+    /// margin for `risk::MARGIN_NOTIONAL_BOUND` (×`MAX_OPEN_LONGS`) would
     /// overflow `u64` and brick withdraws (ADR-0003 forward requirement).
     #[msg("Risk parameters would overflow the margin bound")]
     InvalidRiskParams,
@@ -212,4 +212,14 @@ pub enum PermaError {
     /// The caller targeted their own long. Burn it instead.
     #[msg("Cannot liquidate or force-exercise your own position")]
     SelfTarget,
+
+    // --- P5 value-based premium (appended; 6044+), ADR-0006 ---
+    /// `mint_position` refused: the range is narrower than
+    /// `risk::MIN_RANGE_TICKS`.
+    #[msg("Range is narrower than the minimum width")]
+    RangeTooNarrow,
+    /// `set_premium_params` refused: rate or multiplier is zero or above its
+    /// ceiling, or the margin bound would no longer fit.
+    #[msg("Premium parameters are out of bounds")]
+    InvalidPremiumParams,
 }

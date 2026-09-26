@@ -34,6 +34,7 @@ import {
 } from "@solana/web3.js";
 import { assert, AssertionError } from "chai";
 import { freshPrice } from "./oracle-mock";
+import { testPricing } from "./pricing";
 
 /**
  * Every send in this suite confirms at `confirmed`, and so does every
@@ -89,6 +90,7 @@ describe("range-unwind: empty-range residue sweep (P1)", () => {
   const program = anchor.workspace.Perma as Program;
   const conn = provider.connection;
   const me = provider.wallet.publicKey;
+  const pricing = testPricing(program, provider);
 
   const pda = (seeds: (Buffer | Uint8Array)[]) =>
     PublicKey.findProgramAddressSync(seeds, program.programId)[0];
@@ -334,6 +336,7 @@ describe("range-unwind: empty-range residue sweep (P1)", () => {
         })
         .rpc(CONFIRMED);
     }
+    await pricing.enable();
     if ((await marketState()).isPaused) {
       await program.methods.unpauseMarket().accounts({ admin: me, globalConfig, market }).rpc(CONFIRMED);
     }
@@ -469,5 +472,6 @@ describe("range-unwind: empty-range residue sweep (P1)", () => {
       assert.equal(r.totalShortLiquidity.toString(), "0", "suite must leave its range empty");
       assert.equal(r.totalLongLiquidity.toString(), "0");
     }
+    await pricing.restore();
   });
 });

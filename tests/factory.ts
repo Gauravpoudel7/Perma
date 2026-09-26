@@ -28,10 +28,10 @@ const VAULT_A = new PublicKey("3umaZKmQYDM2xbduPAa6LQWwj7Ngh4X6ZTRoNCfzNDdY");
 const VAULT_B = new PublicKey("HNR1XRJoG6gLPDfk5Hwz8p5S7PTihFZkvHrsdxGWaYWR");
 
 /** Documented Fair MVP defaults (07-premium-engine.md section A). */
-const PREMIUM_RATE = 1_000_000;
-const PREMIUM_MULTIPLIER = 1_000;
+const PREMIUM_RATE = 11_111;
+const PREMIUM_MULTIPLIER = 1;
 /** `state::risk_defaults` (ADR-0003). Demo values, not fair value. */
-const LONG_MARGIN_HORIZON_SLOTS = 1_000;
+const LONG_MARGIN_HORIZON_SLOTS = 216_000;
 const LONG_MARGIN_BUFFER_USDC = 1_000_000;
 
 describe("factory: GlobalConfig, admin, and allowlist", () => {
@@ -141,15 +141,11 @@ describe("factory: GlobalConfig, admin, and allowlist", () => {
     const m = await (program.account as any).market.fetch(market);
     assert.equal(m.premiumRate.toNumber(), PREMIUM_RATE);
     assert.equal(m.premiumMultiplier.toNumber(), PREMIUM_MULTIPLIER);
-    // Component 09. At these defaults horizon × rate × mult / SCALE == 1, so
-    // required_margin(L) == L µUSDC + buffer - a coincidence, not a law.
+    // ADR-0006: premium is 0.01 % of notional per hour (9,000 slots), and
+    // margin is one day of it plus 1 USDC.
     assert.equal(m.longMarginHorizonSlots.toNumber(), LONG_MARGIN_HORIZON_SLOTS);
     assert.equal(m.longMarginBufferUsdc.toNumber(), LONG_MARGIN_BUFFER_USDC);
-    assert.equal(
-      (LONG_MARGIN_HORIZON_SLOTS * PREMIUM_RATE * PREMIUM_MULTIPLIER) / 1e12,
-      1,
-      "the demo horizon factor is exactly 1"
-    );
+    assert.closeTo((9_000 * PREMIUM_RATE * PREMIUM_MULTIPLIER) / 1e12, 1e-4, 1e-8, "0.01 % of notional per hour");
   });
 
   it("rejects create_market from a non-admin signer", async () => {

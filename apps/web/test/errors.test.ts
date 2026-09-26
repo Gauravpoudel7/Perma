@@ -19,6 +19,8 @@ const ALL_VARIANTS = [
   "OracleUnavailable", "OracleStale", "OracleConfidenceTooWide", "OracleDeviationTooHigh",
   // P4 (ADR-0005).
   "AccountSolvent", "NotExercisable", "SelfTarget",
+  // P5 (ADR-0006).
+  "RangeTooNarrow", "InvalidPremiumParams",
 ];
 
 describe("PERMA_ERROR_COPY", () => {
@@ -29,8 +31,8 @@ describe("PERMA_ERROR_COPY", () => {
     }
   });
 
-  it("has exactly 42 entries — no stray or duplicate keys", () => {
-    expect(Object.keys(PERMA_ERROR_COPY).length).toBe(42);
+  it("has exactly 44 entries — no stray or duplicate keys", () => {
+    expect(Object.keys(PERMA_ERROR_COPY).length).toBe(44);
     expect(Object.keys(PERMA_ERROR_COPY).sort()).toEqual([...ALL_VARIANTS].sort());
   });
 });

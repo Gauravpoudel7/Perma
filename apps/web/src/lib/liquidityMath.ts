@@ -11,6 +11,8 @@
  * estimate with a slippage buffer applied on top, not a settlement figure.
  */
 
+import { sqrtPriceX64 as sqrtPriceX64AtTick } from "./tickMath";
+
 function sqrtPriceAtTick(tick: number): number {
   return Math.pow(1.0001, tick / 2);
 }
@@ -47,25 +49,40 @@ export function amountsForLiquidity(
   };
 }
 
-/** Slippage-padded `token_max_a`/`token_max_b`, as bigints, for a mint call. */
+/**
+ * Exactly what Orca's `increase_liquidity` takes for `liquidity` at the pool's
+ * actual √price (`get_amount_delta_a/b`, rounded up), in base units. Integer
+ * math from the same tick table as the program (`tickMath.ts`), not the float
+ * estimate above: a whole-tick float under-counts the near side by up to
+ * 1 / (ticks from spot to the range edge), which on a narrow range exceeds any
+ * sensible slippage buffer.
+ */
+export function exactDepositAmounts(
+  liquidity: bigint,
+  sqrtPriceX64: bigint,
+  tickLower: number,
+  tickUpper: number
+): { amountA: bigint; amountB: bigint } {
+  const lo = sqrtPriceX64AtTick(tickLower);
+  const hi = sqrtPriceX64AtTick(tickUpper);
+  const p = sqrtPriceX64 < lo ? lo : sqrtPriceX64 > hi ? hi : sqrtPriceX64;
+  const ceilDiv = (a: bigint, b: bigint) => (a + b - 1n) / b;
+  const amountA = p < hi ? ceilDiv((liquidity << 64n) * (hi - p), hi * p) : 0n;
+  const amountB = p > lo ? ceilDiv(liquidity * (p - lo), 1n << 64n) : 0n;
+  return { amountA, amountB };
+}
+
+/** Slippage-padded `token_max_a`/`token_max_b` for a mint call, from the exact amounts. */
 export function slippageCappedTokenMax(
   liquidity: bigint,
-  tickCurrent: number,
+  sqrtPriceX64: bigint,
   tickLower: number,
   tickUpper: number,
   slippageBps = 100 // 1%
 ): { tokenMaxA: bigint; tokenMaxB: bigint } {
-  const { amountA, amountB } = amountsForLiquidity(
-    Number(liquidity),
-    tickCurrent,
-    tickLower,
-    tickUpper
-  );
-  const factor = 1 + slippageBps / 10_000;
-  return {
-    tokenMaxA: BigInt(Math.ceil(amountA * factor)),
-    tokenMaxB: BigInt(Math.ceil(amountB * factor)),
-  };
+  const { amountA, amountB } = exactDepositAmounts(liquidity, sqrtPriceX64, tickLower, tickUpper);
+  const pad = (x: bigint) => (x * BigInt(10_000 + slippageBps) + 9_999n) / 10_000n;
+  return { tokenMaxA: pad(amountA), tokenMaxB: pad(amountB) };
 }
 
 // --- Size in tokens (the ticket's input) ------------------------------------

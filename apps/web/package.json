@@ -20,6 +20,7 @@
     "pause-market": "tsx scripts/pause-market.ts pause",
     "unpause-market": "tsx scripts/pause-market.ts unpause",
     "set-risk-params": "tsx scripts/pause-market.ts set-risk-params",
+    "set-premium-params": "tsx scripts/pause-market.ts set-premium-params",
     "transfer-admin": "tsx scripts/pause-market.ts transfer-admin",
     "sync-fixture-wallet": "node scripts/sync-fixture-wallet.mjs"
   },

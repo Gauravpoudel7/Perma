@@ -53,6 +53,8 @@ export function useRequiredFreeUsdc(): RequiredFreeUsdcView | null {
       accruedScaled: BigInt(p.accruedScaled.toString()),
       entryIndex: BigInt(p.entryIndex.toString()),
       liquidity: BigInt(p.liquidity.toString()),
+      tickLower: p.tickLower,
+      tickUpper: p.tickUpper,
     })),
     projected,
     marketRiskFields

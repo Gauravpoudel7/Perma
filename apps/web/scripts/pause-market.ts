@@ -7,6 +7,7 @@
  *   yarn pause-market
  *   yarn unpause-market
  *   yarn set-risk-params <long_margin_horizon_slots> <long_margin_buffer_usdc>
+ *   yarn set-premium-params <premium_rate> <premium_multiplier>   # ADR-0006
  *   yarn transfer-admin <new_admin_pubkey>     # P1: hand admin to a Squads vault
  *
  * While paused: mint / deposit / lock are rejected; burn / settle / withdraw /
@@ -16,11 +17,20 @@ import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { AnchorProvider, BN, Program } from "@coral-xyz/anchor";
 import idl from "../src/idl/perma.json" with { type: "json" };
 import type { Perma } from "../src/idl/perma";
-import { globalConfigPda, marketPda } from "../src/lib/pda";
+import { globalConfigPda, marketPda, premiumIndexPda } from "../src/lib/pda";
 import { fetchMarket } from "../src/lib/accounts";
 import { WHIRLPOOL } from "../src/lib/constants";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
+
+/** Host only: an RPC URL can carry an API key in its path or query. */
+const rpcHost = (u: string) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return "<rpc>";
+  }
+};
 
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "http://127.0.0.1:8899";
 const connection = new Connection(RPC_URL, "confirmed");
@@ -49,10 +59,10 @@ async function main() {
     // "wrong key" apart from "wrong cluster".
     const cfg = await program.account.globalConfig.fetch(globalConfig);
     console.log(
-      `${label}: admin=${cfg.admin.toBase58()} isPaused=${m.isPaused} horizon=${m.longMarginHorizonSlots.toString()} buffer=${m.longMarginBufferUsdc.toString()}`
+      `${label}: admin=${cfg.admin.toBase58()} isPaused=${m.isPaused} horizon=${m.longMarginHorizonSlots.toString()} buffer=${m.longMarginBufferUsdc.toString()} rate=${m.premiumRate.toString()} mult=${m.premiumMultiplier.toString()}`
     );
   };
-  console.log(`RPC: ${RPC_URL}\nAdmin: ${admin.publicKey.toBase58()}\nMarket: ${market.toBase58()}`);
+  console.log(`RPC: ${rpcHost(RPC_URL)}\nAdmin: ${admin.publicKey.toBase58()}\nMarket: ${market.toBase58()}`);
   await show("before");
 
   const accounts = { admin: admin.publicKey, market };
@@ -72,6 +82,14 @@ async function main() {
         .rpc();
       break;
     }
+    case "set-premium-params": {
+      if (!arg1 || !arg2) throw new Error("usage: set-premium-params <rate> <multiplier>");
+      sig = await program.methods
+        .setPremiumParams(new BN(arg1), new BN(arg2))
+        .accountsPartial({ ...accounts, premiumIndex: premiumIndexPda(market)[0] })
+        .rpc();
+      break;
+    }
     case "transfer-admin": {
       if (!arg1) throw new Error("usage: transfer-admin <new_admin_pubkey>");
       // One-way from this script's point of view: only the new admin can
@@ -84,7 +102,7 @@ async function main() {
       break;
     }
     default:
-      throw new Error("usage: pause | unpause | set-risk-params <horizon> <buffer> | transfer-admin <pubkey>");
+      throw new Error("usage: pause | unpause | set-risk-params <horizon> <buffer> | set-premium-params <rate> <mult> | transfer-admin <pubkey>");
   }
   console.log(`tx: ${sig}`);
   await show("after");

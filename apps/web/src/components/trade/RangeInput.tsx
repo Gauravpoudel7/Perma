@@ -9,6 +9,8 @@ import { useChainStore } from "../../store/useChainStore";
 import { checkTickArraysExist, findSampleTickArrayLen, FALLBACK_TICK_ARRAY_LEN, type TickArrayStatus } from "../../lib/tickArray";
 import { sqrtPriceX64ToPrice, tickToPrice } from "../../lib/whirlpool";
 import { centeredRange, isFarFromSpot } from "../../lib/rangeCenter";
+import { MIN_RANGE_TICKS } from "../../lib/tickMath";
+import { PERMA_ERROR_COPY } from "../../lib/errors";
 import { WHIRLPOOL } from "../../lib/constants";
 
 const DECIMALS_A = 9;
@@ -154,6 +156,11 @@ export function RangeInput({
         {tickToPrice(tickUpper, DECIMALS_A, DECIMALS_B).toFixed(2)} USDC/SOL (ticks {tickLower} to{" "}
         {tickUpper})
       </p>
+      {tickUpper - tickLower < MIN_RANGE_TICKS && (
+        <p role="alert" className="text-body-sm mt-3 rounded-md border border-border p-3 text-text-primary">
+          {PERMA_ERROR_COPY.RangeTooNarrow} This one is {tickUpper - tickLower} ticks.
+        </p>
+      )}
       {far && spot && (
         <div role="status" className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3">
           <p className="text-body-sm text-text-muted">

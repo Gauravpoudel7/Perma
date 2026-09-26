@@ -35,6 +35,7 @@ use crate::collateral::Side;
 use crate::errors::PermaError;
 use crate::premium::{payable_if_settled_now, PREMIUM_SCALE};
 use crate::state::{leg_type, position_status, seeds, Market, PermaPosition, UserCollateral};
+use crate::tick_math::{notional_q64, notional_usdc, U256};
 
 /// Upper bound on open longs per user per market.
 ///
@@ -43,71 +44,97 @@ use crate::state::{leg_type, position_status, seeds, Market, PermaPosition, User
 /// transaction limit (measured in Phase 1). Enforced in `mint_long_inner`.
 pub const MAX_OPEN_LONGS: u16 = 8;
 
-/// `ceil(horizon × rate × L × mult / PREMIUM_SCALE) + buffer`, in µUSDC.
+/// `ceil(horizon × rate × mult × notional / PREMIUM_SCALE) + buffer`, in µUSDC,
+/// where notional = `L × v` of the long's range (ADR-0006).
 ///
 /// Derived from the shipped premium formula, so the only invented number is
 /// the horizon. **Rounds up** (protocol-conservative). Every product is checked;
 /// a wrap fails `MathOverflow` rather than admitting a long with zero margin.
-///
-/// With `risk_defaults` this is `L + 1_000_000` exactly - see `state.rs`.
-pub(crate) fn required_margin(market: &Market, liquidity: u128) -> Result<u64> {
+pub(crate) fn required_margin(
+    market: &Market,
+    liquidity: u128,
+    tick_lower: i32,
+    tick_upper: i32,
+) -> Result<u64> {
     required_margin_with(
         market.long_margin_horizon_slots,
         market.premium_rate,
         market.premium_multiplier,
         market.long_margin_buffer_usdc,
-        liquidity,
+        notional_q64(liquidity, tick_lower, tick_upper)?,
     )
 }
 
-/// The margin formula over explicit parameters, so `set_market_risk_params`
-/// can re-validate a *candidate* horizon/buffer through the exact checked path
-/// the runtime uses (ADR-0003 forward requirement). `required_margin` is a
-/// delegate to this; there is one implementation.
+/// The margin formula over explicit parameters and a Q64 notional, so the
+/// setters can re-validate *candidate* parameters through the exact checked
+/// path the runtime uses (ADR-0003 forward requirement). `required_margin` is
+/// a delegate to this; there is one implementation.
 pub(crate) fn required_margin_with(
     horizon_slots: u64,
     premium_rate: u64,
     premium_multiplier: u64,
     buffer_usdc: u64,
-    liquidity: u128,
+    notional_q64: U256,
 ) -> Result<u64> {
-    let scaled = (horizon_slots as u128)
+    let per_notional = (horizon_slots as u128)
         .checked_mul(premium_rate as u128)
-        .ok_or(PermaError::MathOverflow)?
-        .checked_mul(liquidity)
         .ok_or(PermaError::MathOverflow)?
         .checked_mul(premium_multiplier as u128)
         .ok_or(PermaError::MathOverflow)?;
-    let q = scaled / PREMIUM_SCALE;
-    let r = scaled % PREMIUM_SCALE;
-    let per_horizon = q + u128::from(r != 0);
+    // ⌈⌈x / 2^64⌉ / 1e12⌉ == ⌈x / (2^64 · 1e12)⌉ for integers.
+    let per_horizon = notional_q64
+        .checked_mul_u128(per_notional)
+        .ok_or(PermaError::MathOverflow)?
+        .shr(64, true)
+        .div_u64(PREMIUM_SCALE as u64, true)
+        .to_u128()?;
     let total = per_horizon
         .checked_add(buffer_usdc as u128)
         .ok_or(PermaError::MathOverflow)?;
     u64::try_from(total).map_err(|_| PermaError::MathOverflow.into())
 }
 
-/// Largest single-position liquidity the risk parameters must stay solvent
-/// for. `set_market_risk_params` rejects any horizon/buffer whose margin at
-/// this L - summed over `MAX_OPEN_LONGS` positions, as `required_free_usdc`
-/// does - would not fit `u64`, because an overflow at *withdraw* time locks
-/// the user's funds (ADR-0003).
-///
-/// `2^52 ≈ 4.5e15`: ~4.5e7× the largest demo position (`1e8`), ≈ $800k in the
-/// narrowest 8-tick band of a SOL/USDC pool at ~$200. The trade-off it fixes:
-/// `8 × (horizon × rate × mult / 1e12) × 2^52 ≤ u64::MAX` ⇒ factor ≤ 512 ⇒
-/// at the demo rate/multiplier the admissible horizon is ≤ ~512_000 slots
-/// (~2.4 days). Raising this bound tightens that ceiling; see
-/// `IMPL-10-FEASIBILITY.md` Q4 before changing it.
-pub const MARGIN_LIQUIDITY_BOUND: u128 = 1 << 52;
+/// Largest single-long notional, in µUSDC, the risk parameters must stay
+/// solvent for: 2^52 µUSDC ≈ 4.5 bn USDC. `mint_position(LONG)` refuses a
+/// larger long ([`check_notional_bound`]), and both setters refuse parameters
+/// whose margin at this notional - summed over `MAX_OPEN_LONGS`, as
+/// `required_free_usdc` does - would not fit `u64`, because an overflow at
+/// *withdraw* time would lock the user's funds (ADR-0003, ADR-0006).
+pub const MARGIN_NOTIONAL_BOUND: u128 = 1 << 52;
+
+/// Hard ceilings for `set_premium_params` (ADR-0006): the Fair-era values,
+/// 0.1 % of notional per slot. The deployed rate is 11_111 × 1.
+pub const MAX_PREMIUM_RATE: u64 = 1_000_000;
+pub const MAX_PREMIUM_MULTIPLIER: u64 = 1_000;
+
+/// Smallest range a new long or short may use, in ticks (ADR-0006 Q2): four
+/// tick spacings on the demo pool.
+pub const MIN_RANGE_TICKS: i32 = 32;
+
+/// Refuse a long whose notional is past [`MARGIN_NOTIONAL_BOUND`].
+pub(crate) fn check_notional_bound(liquidity: u128, tick_lower: i32, tick_upper: i32) -> Result<()> {
+    require!(
+        notional_usdc(liquidity, tick_lower, tick_upper)? <= MARGIN_NOTIONAL_BOUND,
+        PermaError::MathOverflow
+    );
+    Ok(())
+}
+
+/// `8 × margin(MARGIN_NOTIONAL_BOUND)` fits `u64` under these parameters. The
+/// formula is monotone in notional, so passing at the bound covers every long.
+fn margin_bound_fits(horizon: u64, buffer: u64, rate: u64, mult: u64) -> bool {
+    let at_bound = U256::mul(MARGIN_NOTIONAL_BOUND, 1u128 << 64);
+    required_margin_with(horizon, rate, mult, buffer, at_bound)
+        .ok()
+        .and_then(|m| u128::from(m).checked_mul(u128::from(MAX_OPEN_LONGS)))
+        .is_some_and(|sum| sum <= u128::from(u64::MAX))
+}
 
 /// Gate a candidate `(horizon, buffer)` for `set_market_risk_params`.
 ///
 /// Rejects a zero horizon (margin would collapse to the buffer for any L) or
-/// zero buffer (the ADR's flat floor), then proves the margin at
-/// [`MARGIN_LIQUIDITY_BOUND`] - and its `MAX_OPEN_LONGS`-fold sum - fits
-/// `u64` under the market's *current* rate and multiplier. The formula is
-/// monotone in L, so passing at the bound covers every smaller position.
+/// zero buffer (the ADR's flat floor), then proves the bound above under the
+/// market's *current* rate and multiplier.
 pub(crate) fn validate_risk_params(
     horizon_slots: u64,
     buffer_usdc: u64,
@@ -116,18 +143,31 @@ pub(crate) fn validate_risk_params(
 ) -> Result<()> {
     require!(horizon_slots > 0, PermaError::InvalidRiskParams);
     require!(buffer_usdc > 0, PermaError::InvalidRiskParams);
-    let margin = required_margin_with(
-        horizon_slots,
-        premium_rate,
-        premium_multiplier,
-        buffer_usdc,
-        MARGIN_LIQUIDITY_BOUND,
-    )
-    .map_err(|_| error!(PermaError::InvalidRiskParams))?;
-    let sum = u128::from(margin)
-        .checked_mul(u128::from(MAX_OPEN_LONGS))
-        .ok_or(PermaError::InvalidRiskParams)?;
-    require!(sum <= u128::from(u64::MAX), PermaError::InvalidRiskParams);
+    require!(
+        margin_bound_fits(horizon_slots, buffer_usdc, premium_rate, premium_multiplier),
+        PermaError::InvalidRiskParams
+    );
+    Ok(())
+}
+
+/// Gate a candidate `(rate, multiplier)` for `set_premium_params`: both in
+/// `1..=MAX_*`, and the margin bound still holds at the market's *current*
+/// horizon and buffer.
+pub(crate) fn validate_premium_params(
+    premium_rate: u64,
+    premium_multiplier: u64,
+    horizon_slots: u64,
+    buffer_usdc: u64,
+) -> Result<()> {
+    require!(
+        (1..=MAX_PREMIUM_RATE).contains(&premium_rate)
+            && (1..=MAX_PREMIUM_MULTIPLIER).contains(&premium_multiplier),
+        PermaError::InvalidPremiumParams
+    );
+    require!(
+        margin_bound_fits(horizon_slots, buffer_usdc, premium_rate, premium_multiplier),
+        PermaError::InvalidPremiumParams
+    );
     Ok(())
 }
 
@@ -162,7 +202,7 @@ fn requirement_parts(
             .checked_add(payable_if_settled_now(pos, projected, market)? as u128)
             .ok_or(PermaError::MathOverflow)?;
         margin = margin
-            .checked_add(required_margin(market, pos.liquidity)? as u128)
+            .checked_add(required_margin(market, pos.liquidity, pos.tick_lower, pos.tick_upper)? as u128)
             .ok_or(PermaError::MathOverflow)?;
     }
     Ok((owed, margin))
@@ -170,8 +210,8 @@ fn requirement_parts(
 
 /// ADR-0005 §3 numeric policy. Demo values; change only by amending the ADR.
 pub const MAINT_MARGIN_BPS: u128 = 7_500;
-pub const FX_FEE_BASE_SLOTS: u64 = 100;
-pub const FX_FEE_MAX_HALVINGS: i64 = 10;
+/// Force-exercise fee, in bps of the long's notional (ADR-0006 Q3): 0.1 %.
+pub const FX_FEE_BPS: u64 = 10;
 /// Smallest liquidation shortfall that pauses the market (1 USDC, the
 /// default margin buffer every long posts). Below it the unpaid premium is
 /// written off to the range's shorts as their existing `premium_receivable`
@@ -217,28 +257,17 @@ pub(crate) fn liquidation_bonus(remaining: u64, deficit: u64, target_margin: u64
     Ok((remaining / 2).min(deficit).min(released))
 }
 
-/// Force-exercise fee (ADR-0005 §2): the premium this long would pay over
-/// `FX_FEE_BASE_SLOTS`, halved per half-width the tick sits from the range
-/// midpoint, at most `FX_FEE_MAX_HALVINGS` times, floor 1 µUSDC.
-pub(crate) fn force_exercise_fee(
-    market: &Market,
-    liquidity: u128,
-    tick_lower: i32,
-    tick_upper: i32,
-    tick: i32,
-) -> Result<u64> {
-    let base = required_margin_with(
-        FX_FEE_BASE_SLOTS,
-        market.premium_rate,
-        market.premium_multiplier,
-        0,
-        liquidity,
-    )?;
-    let hw = ((i64::from(tick_upper) - i64::from(tick_lower)) / 2).max(1);
-    let mid = i64::from(tick_lower) + hw;
-    let n = ((i64::from(tick) - mid).abs() / hw).max(1);
-    let halvings = (n - 1).min(FX_FEE_MAX_HALVINGS) as u32;
-    Ok((base >> halvings).max(1))
+/// Force-exercise fee (ADR-0005 §2 as amended by ADR-0006): `FX_FEE_BPS` of
+/// the long's notional `L × v`, rounded up, floor 1 µUSDC. It no longer
+/// depends on how far out of range the tick is.
+pub(crate) fn force_exercise_fee(liquidity: u128, tick_lower: i32, tick_upper: i32) -> Result<u64> {
+    let fee = notional_q64(liquidity, tick_lower, tick_upper)?
+        .checked_mul_u128(FX_FEE_BPS as u128)
+        .ok_or(PermaError::MathOverflow)?
+        .shr(64, true)
+        .div_u64(BPS as u64, true)
+        .to_u128()?;
+    Ok(u64::try_from(fee).map_err(|_| PermaError::MathOverflow)?.max(1))
 }
 
 /// Gate a withdrawal of `amount_a` WSOL and `amount_b` USDC.
@@ -286,9 +315,12 @@ pub(crate) fn check_long_mint_allowed(
     projected: u128,
     market: &Market,
     new_liquidity: u128,
+    tick_lower: i32,
+    tick_upper: i32,
 ) -> Result<()> {
+    check_notional_bound(new_liquidity, tick_lower, tick_upper)?;
     let existing = required_free_usdc(user, longs, projected, market)? as u128;
-    let new_margin = required_margin(market, new_liquidity)? as u128;
+    let new_margin = required_margin(market, new_liquidity, tick_lower, tick_upper)? as u128;
     let required = existing
         .checked_add(new_margin)
         .ok_or(PermaError::MathOverflow)?;
@@ -384,10 +416,13 @@ mod tests {
             is_paused: false,
             authority_bump: 255,
             bump: 255,
-            premium_rate: premium_defaults::PREMIUM_RATE,
-            premium_multiplier: premium_defaults::PREMIUM_MULTIPLIER,
-            long_margin_horizon_slots: risk_defaults::LONG_MARGIN_HORIZON_SLOTS,
-            long_margin_buffer_usdc: risk_defaults::LONG_MARGIN_BUFFER_USDC,
+            // Test pricing: the old Fair per-slot numbers, now the ceilings.
+            // One horizon of premium is then exactly the notional, so margin
+            // = notional + 1 USDC - the analogue of Fair's `L + 1 USDC`.
+            premium_rate: MAX_PREMIUM_RATE,
+            premium_multiplier: MAX_PREMIUM_MULTIPLIER,
+            long_margin_horizon_slots: 1_000,
+            long_margin_buffer_usdc: 1_000_000,
         }
     }
 
@@ -412,8 +447,8 @@ mod tests {
             owner: Pubkey::new_unique(),
             orca_position: Pubkey::default(),
             position_mint: Pubkey::default(),
-            tick_lower: -40176,
-            tick_upper: -38168,
+            tick_lower: LO,
+            tick_upper: HI,
             liquidity,
             in_orca_a: 0,
             in_orca_b: 0,
@@ -430,63 +465,95 @@ mod tests {
         }
     }
 
+    // --- notional helpers ------------------------------------------------------
+
+    /// The demo range every vector uses.
+    const LO: i32 = -40176;
+    const HI: i32 = -38168;
+
+    /// Largest L whose notional on the demo range is at most `usdc` µUSDC, so
+    /// its ceil is exactly `usdc` (v/2^64 ≈ 0.028 < 1).
+    fn l_for(usdc: u128) -> u128 {
+        (usdc << 64) / crate::tick_math::range_value_q64(LO, HI).unwrap()
+    }
+
     // --- required_margin ---------------------------------------------------
 
-    /// At the demo defaults the horizon factor is exactly 1: margin == L + 1 USDC.
+    /// At test pricing, margin == ⌈notional⌉ + 1 USDC.
     #[test]
-    fn margin_at_demo_defaults_is_liquidity_plus_buffer() {
+    fn margin_at_test_pricing_is_notional_plus_buffer() {
         let m = market();
-        assert_eq!(required_margin(&m, 1).unwrap(), 1_000_001);
-        assert_eq!(required_margin(&m, 50_000_000).unwrap(), 51_000_000);
-        assert_eq!(required_margin(&m, 0).unwrap(), 1_000_000, "buffer alone");
+        assert_eq!(required_margin(&m, 1, LO, HI).unwrap(), 1_000_001, "dust notional rounds up to 1");
+        assert_eq!(required_margin(&m, l_for(50_000_000), LO, HI).unwrap(), 51_000_000);
+        assert_eq!(required_margin(&m, 0, LO, HI).unwrap(), 1_000_000, "buffer alone");
+    }
+
+    /// Margin is priced on notional, so equal notionals on any width cost the
+    /// same, whatever L each needed.
+    #[test]
+    fn margin_is_width_neutral_for_equal_notional() {
+        let m = market();
+        let l = |lo: i32, hi: i32| (50_000_000u128 << 64) / crate::tick_math::range_value_q64(lo, hi).unwrap();
+        let narrow = required_margin(&m, l(-39_152, -39_120), -39_152, -39_120).unwrap();
+        let wide = required_margin(&m, l(-40_160, -38_112), -40_160, -38_112).unwrap();
+        assert_eq!(narrow, 51_000_000);
+        assert_eq!(wide, 51_000_000);
     }
 
     /// Rounding is UP: a horizon that does not divide evenly costs one more unit.
     #[test]
     fn margin_rounds_up_not_down() {
         let mut m = market();
-        m.long_margin_horizon_slots = 1; // 1 × 1e6 × L × 1e3 / 1e12 = L / 1e3
+        m.long_margin_horizon_slots = 1; // 1 × 1e6 × 1e3 / 1e12 = notional / 1e3
         m.long_margin_buffer_usdc = 0;
-        assert_eq!(required_margin(&m, 1_000).unwrap(), 1, "exact");
-        assert_eq!(required_margin(&m, 1_001).unwrap(), 2, "1.001 -> 2");
-        assert_eq!(required_margin(&m, 1).unwrap(), 1, "0.001 -> 1, never 0");
+        assert_eq!(required_margin(&m, l_for(1_000), LO, HI).unwrap(), 1, "≤ 1.0");
+        assert_eq!(required_margin(&m, l_for(1_001), LO, HI).unwrap(), 2, "1.001 -> 2");
+        assert_eq!(required_margin(&m, 1, LO, HI).unwrap(), 1, "0.00003 -> 1, never 0");
     }
 
     /// A product that wraps fails loudly instead of admitting a zero-margin long.
     #[test]
     fn margin_overflow_is_an_error_not_a_wrap() {
         let m = market();
-        assert!(required_margin(&m, u128::MAX).is_err());
+        assert!(required_margin(&m, u128::MAX, LO, HI).is_err());
+        assert!(required_margin(&m, u128::MAX, crate::tick_math::MIN_TICK_INDEX, crate::tick_math::MAX_TICK_INDEX).is_err());
     }
 
-    // --- validate_risk_params (component 10, ADR-0003 forward requirement) --
+    // --- validate_risk_params / validate_premium_params (ADR-0003, ADR-0006) --
 
     const RATE: u64 = premium_defaults::PREMIUM_RATE;
     const MULT: u64 = premium_defaults::PREMIUM_MULTIPLIER;
     const HORIZON: u64 = risk_defaults::LONG_MARGIN_HORIZON_SLOTS;
     const BUFFER: u64 = risk_defaults::LONG_MARGIN_BUFFER_USDC;
 
-    /// The shipped defaults pass, with the exact headroom claimed in
-    /// `IMPL-10-FEASIBILITY.md` Q4.
+    fn at_bound() -> U256 {
+        U256::mul(MARGIN_NOTIONAL_BOUND, 1u128 << 64)
+    }
+
+    /// The shipped defaults (11_111 × 1, 216_000 slots) pass, and the margin
+    /// at the bound matches an independent u128 computation.
     #[test]
-    fn demo_defaults_pass_the_bound_with_headroom() {
+    fn shipped_defaults_pass_the_bound_with_headroom() {
+        assert_eq!((RATE, MULT, HORIZON), (11_111, 1, 216_000));
         assert!(validate_risk_params(HORIZON, BUFFER, RATE, MULT).is_ok());
-        let at_bound =
-            required_margin_with(HORIZON, RATE, MULT, BUFFER, MARGIN_LIQUIDITY_BOUND).unwrap();
-        assert_eq!(at_bound, 4_503_599_628_370_496, "factor 1: L + buffer");
-        assert_eq!(
-            u128::from(at_bound) * u128::from(MAX_OPEN_LONGS),
-            36_028_797_026_963_968
-        );
+        assert!(validate_premium_params(RATE, MULT, HORIZON, BUFFER).is_ok());
+        let margin = required_margin_with(HORIZON, RATE, MULT, BUFFER, at_bound()).unwrap();
+        let x = HORIZON as u128 * RATE as u128 * MULT as u128 * MARGIN_NOTIONAL_BOUND;
+        assert_eq!(margin as u128, x.div_ceil(PREMIUM_SCALE) + BUFFER as u128);
+        assert!(margin as u128 * MAX_OPEN_LONGS as u128 <= u64::MAX as u128);
     }
 
     /// A single margin that still fits u64 but whose 8-fold sum does not is
     /// exactly the withdraw-time brick the ADR names; the sum guard catches it.
     #[test]
     fn sum_over_max_open_longs_is_guarded() {
+        let (r, m) = (MAX_PREMIUM_RATE, MAX_PREMIUM_MULTIPLIER);
         let horizon = 1_000_000; // factor 1000: margin(BOUND) ≈ 4.5e18 fits, ×8 does not
-        assert!(required_margin_with(horizon, RATE, MULT, BUFFER, MARGIN_LIQUIDITY_BOUND).is_ok());
-        assert!(validate_risk_params(horizon, BUFFER, RATE, MULT).is_err());
+        assert!(required_margin_with(horizon, r, m, BUFFER, at_bound()).is_ok());
+        assert!(validate_risk_params(horizon, BUFFER, r, m).is_err());
+        // At the ceilings, 1 day still fits; ~2.4 days is the limit.
+        assert!(validate_risk_params(HORIZON, BUFFER, r, m).is_ok());
+        assert!(validate_risk_params(520_000, BUFFER, r, m).is_err());
     }
 
     #[test]
@@ -504,25 +571,48 @@ mod tests {
     /// `MathOverflow`, so the admin and the tests see one name.
     #[test]
     fn rejections_are_invalid_risk_params() {
+        let (r, m) = (MAX_PREMIUM_RATE, MAX_PREMIUM_MULTIPLIER);
         for (h, b) in [(0, BUFFER), (HORIZON, 0), (1_000_000, BUFFER), (u64::MAX, BUFFER)] {
-            let err = validate_risk_params(h, b, RATE, MULT).unwrap_err();
-            assert!(
-                err.to_string().contains("InvalidRiskParams"),
-                "({h}, {b}) -> {err}"
+            let err = validate_risk_params(h, b, r, m).unwrap_err();
+            assert!(err.to_string().contains("InvalidRiskParams"), "({h}, {b}) -> {err}");
+        }
+    }
+
+    /// `set_premium_params`: zero, above the ceiling, or a pair that would
+    /// break the margin bound at the current horizon - all `InvalidPremiumParams`.
+    #[test]
+    fn premium_params_are_bounded() {
+        let ok = |r, m| validate_premium_params(r, m, HORIZON, BUFFER);
+        assert!(ok(RATE, MULT).is_ok());
+        assert!(ok(MAX_PREMIUM_RATE, MAX_PREMIUM_MULTIPLIER).is_ok());
+        for (r, m) in [(0, 1), (1, 0), (MAX_PREMIUM_RATE + 1, 1), (1, MAX_PREMIUM_MULTIPLIER + 1), (u64::MAX, u64::MAX)] {
+            let err = ok(r, m).unwrap_err();
+            assert!(err.to_string().contains("InvalidPremiumParams"), "({r}, {m}) -> {err}");
+        }
+        // Within the ceilings but past the bound at a long horizon.
+        let err = validate_premium_params(MAX_PREMIUM_RATE, MAX_PREMIUM_MULTIPLIER, 600_000, BUFFER).unwrap_err();
+        assert!(err.to_string().contains("InvalidPremiumParams"));
+    }
+
+    /// `required_margin` == `_with` on the same notional.
+    #[test]
+    fn required_margin_delegates_to_required_margin_with() {
+        let m = market();
+        for l in [0u128, 1, 1_000, l_for(50_000_000), l_for(MARGIN_NOTIONAL_BOUND)] {
+            assert_eq!(
+                required_margin(&m, l, LO, HI).unwrap(),
+                required_margin_with(1_000, MAX_PREMIUM_RATE, MAX_PREMIUM_MULTIPLIER, 1_000_000, crate::tick_math::notional_q64(l, LO, HI).unwrap()).unwrap()
             );
         }
     }
 
-    /// The delegate refactor changed nothing: `required_margin` == `_with`.
+    /// A long past the notional bound is refused at mint.
     #[test]
-    fn required_margin_delegates_to_required_margin_with() {
+    fn notional_bound_is_enforced() {
+        assert!(check_notional_bound(l_for(MARGIN_NOTIONAL_BOUND), LO, HI).is_ok());
+        assert!(check_notional_bound(l_for(MARGIN_NOTIONAL_BOUND) + (1u128 << 40), LO, HI).is_err());
         let m = market();
-        for l in [0u128, 1, 1_000, 50_000_000, MARGIN_LIQUIDITY_BOUND] {
-            assert_eq!(
-                required_margin(&m, l).unwrap(),
-                required_margin_with(HORIZON, RATE, MULT, BUFFER, l).unwrap()
-            );
-        }
+        assert!(check_long_mint_allowed(&user(0, u64::MAX), &[], 0, &m, l_for(MARGIN_NOTIONAL_BOUND) * 2, LO, HI).is_err());
     }
 
     // --- required_free_usdc / gates ----------------------------------------
@@ -555,10 +645,9 @@ mod tests {
     #[test]
     fn open_long_accrual_blocks_withdrawal() {
         let m = market();
-        let l = long(50_000_000, 0);
-        // 100 slots elapsed at the demo rate: projected index = 100 × 1e6.
+        let l = long(l_for(50_000_000), 0);
+        // 100 slots at 1e-3 of notional per slot: owes ⌈5 USDC⌉; margin 51 USDC.
         let projected = 100u128 * 1_000_000;
-        // owed = 1e8 × 5e7 × 1e3 / 1e12 = 5_000_000; margin = 51_000_000.
         let required = required_free_usdc(&user(0, 0), &[l.clone()], projected, &m).unwrap();
         assert_eq!(required, 56_000_000);
 
@@ -575,11 +664,9 @@ mod tests {
     #[test]
     fn projection_counts_uncranked_accrual() {
         let m = market();
-        let l = long(50_000_000, 0);
-        let stale = 0u128; // nobody has cranked since the long opened
-        let fresh = 100u128 * 1_000_000;
-        let at_stale = required_free_usdc(&user(0, 0), &[l.clone()], stale, &m).unwrap();
-        let at_fresh = required_free_usdc(&user(0, 0), &[l], fresh, &m).unwrap();
+        let l = long(l_for(50_000_000), 0);
+        let at_stale = required_free_usdc(&user(0, 0), &[l.clone()], 0, &m).unwrap();
+        let at_fresh = required_free_usdc(&user(0, 0), &[l], 100u128 * 1_000_000, &m).unwrap();
         assert_eq!(at_stale, 51_000_000, "margin only");
         assert_eq!(at_fresh, 56_000_000, "margin + 100 slots of premium");
     }
@@ -588,25 +675,26 @@ mod tests {
     fn long_mint_needs_margin_for_the_new_long_on_top_of_existing() {
         let m = market();
         // R1: 1 µUSDC cannot back a 1-unit long (needs 1_000_001).
-        assert!(check_long_mint_allowed(&user(0, 1), &[], 0, &m, 1).is_err());
-        assert!(check_long_mint_allowed(&user(0, 1_000_001), &[], 0, &m, 1).is_ok());
+        assert!(check_long_mint_allowed(&user(0, 1), &[], 0, &m, 1, LO, HI).is_err());
+        assert!(check_long_mint_allowed(&user(0, 1_000_001), &[], 0, &m, 1, LO, HI).is_ok());
 
         // With an existing long, both margins must be covered.
-        let existing = long(50_000_000, 0);
-        let u = user(0, 101_000_000); // 51e6 + 50e6 buffer-less would fail; needs 51e6 + 51e6
-        assert!(check_long_mint_allowed(&u, &[existing.clone()], 0, &m, 50_000_000).is_err());
+        let l50 = l_for(50_000_000);
+        let existing = long(l50, 0);
+        let u = user(0, 101_000_000);
+        assert!(check_long_mint_allowed(&u, &[existing.clone()], 0, &m, l50, LO, HI).is_err());
         let u = user(0, 102_000_000);
-        assert!(check_long_mint_allowed(&u, &[existing], 0, &m, 50_000_000).is_ok());
+        assert!(check_long_mint_allowed(&u, &[existing], 0, &m, l50, LO, HI).is_ok());
     }
 
     /// The projection helper never writes: prove it by value.
     #[test]
     fn payable_if_settled_now_does_not_mutate() {
         let m = market();
-        let l = long(1_000_000, 0);
+        let l = long(l_for(1_000_000), 0);
         let before = (l.entry_index, l.accrued_scaled);
         let p = payable_if_settled_now(&l, 100 * 1_000_000, &m).unwrap();
-        assert_eq!(p, 100_000, "V1 figure, ceil == floor when exact");
+        assert_eq!(p, 100_000, "100 slots × 1e-3 × ⌈1 USDC⌉");
         assert_eq!((l.entry_index, l.accrued_scaled), before);
     }
 
@@ -614,27 +702,26 @@ mod tests {
     #[test]
     fn projection_rounds_up_where_settle_would_floor() {
         let m = market();
-        let l = long(1_500, 0);
-        // 1 slot: 1e6 × 1500 × 1e3 / 1e12 = 1.5 → settle pays 1 (carry 0.5); gate counts 2.
+        let l = long(l_for(1_500), 0);
+        // 1 slot: 1e-3 × 1500 = 1.5 → settle pays 1 (carry 0.5); gate counts 2.
         assert_eq!(payable_if_settled_now(&l, 1_000_000, &m).unwrap(), 2);
     }
 
-    // --- P4, FIXTURES-AND-VECTORS.md §8 (ADR-0005) ---
+    // --- P4, FIXTURES-AND-VECTORS.md §8 (ADR-0005, re-based on notional by ADR-0006) ---
 
-    const L: u128 = 50_000_000;
+    /// A long with exactly 50 USDC of notional on the demo range.
+    fn l50() -> u128 {
+        l_for(50_000_000)
+    }
     const SLOTS_100: u128 = 100 * 1_000_000; // projected index after 100 slots
 
-    /// L1 / L2: 75 % of `L + 1 USDC` is 38.25 USDC; the boundary is solvent.
+    /// L1 / L2: 75 % of `notional + 1 USDC` is 38.25 USDC; the boundary is solvent.
     #[test]
     fn p4_maintenance_and_boundary() {
         let m = market();
-        let longs = [long(L, 0)];
+        let longs = [long(l50(), 0)];
         assert_eq!(maintenance_free_usdc(&user(0, 0), &longs, 0, &m).unwrap(), 38_250_000);
-        assert_eq!(
-            maintenance_free_usdc(&user(0, 0), &longs, SLOTS_100, &m).unwrap(),
-            43_250_000
-        );
-        // Initial requirement is unchanged by P4.
+        assert_eq!(maintenance_free_usdc(&user(0, 0), &longs, SLOTS_100, &m).unwrap(), 43_250_000);
         assert_eq!(required_free_usdc(&user(0, 0), &longs, SLOTS_100, &m).unwrap(), 56_000_000);
     }
 
@@ -642,11 +729,8 @@ mod tests {
     #[test]
     fn p4_liquidation_bonus_vectors() {
         let margin = 51_000_000;
-        // L2: free 40, owes 5 → R = 35, D = 3.25.
         assert_eq!(liquidation_bonus(35_000_000, 3_250_000, margin).unwrap(), 3_250_000);
-        // L3: free 6, owes 5 → R = 1, D = 37.25 → R/2.
         assert_eq!(liquidation_bonus(1_000_000, 37_250_000, margin).unwrap(), 500_000);
-        // Capped by the released maintenance margin.
         assert_eq!(liquidation_bonus(u64::MAX, u64::MAX, margin).unwrap(), 38_250_000);
     }
 
@@ -665,25 +749,26 @@ mod tests {
     #[test]
     fn p4_split_liquidation_never_grows_deficit() {
         let m = market();
-        let a = long(L, 0);
-        let b = long(L, 0);
+        let a = long(l50(), 0);
+        let b = long(l50(), 0);
         let mut free = 70_000_000u64; // maint for both = 2 × 38.25 = 76.5
         let before = maintenance_free_usdc(&user(0, free), &[a.clone(), b.clone()], 0, &m).unwrap() - free;
-        let bonus = liquidation_bonus(free, before, required_margin(&m, L).unwrap()).unwrap();
+        let bonus = liquidation_bonus(free, before, required_margin(&m, l50(), LO, HI).unwrap()).unwrap();
         free -= bonus;
         let after = maintenance_free_usdc(&user(0, free), &[b], 0, &m).unwrap().saturating_sub(free);
         assert!(after <= before, "deficit {after} grew from {before}");
     }
 
-    /// FX_NEAR / FX_FAR / floors on the demo range [-40176, -38168).
+    /// FX fee = 0.1 % of notional, rounded up, floor 1 µUSDC (ADR-0006 Q3).
     #[test]
     fn p4_force_exercise_fee_vectors() {
-        let m = market();
-        let fee = |liq, tick| force_exercise_fee(&m, liq, -40176, -38168, tick).unwrap();
-        assert_eq!(fee(L, -37858), 5_000_000, "FX_NEAR_RANGE_FEE");
-        assert_eq!(fee(L, -34152), 312_500, "FX_FAR_RANGE_FEE");
-        assert_eq!(fee(L, -20000), 4_882, "at most 10 halvings");
-        assert_eq!(fee(1, -37858), 1, "floor 1 µUSDC");
-        assert_eq!(fee(L, -44192), fee(L, -34152), "symmetric about the midpoint");
+        let fee = |liq| force_exercise_fee(liq, LO, HI).unwrap();
+        assert_eq!(fee(l50()), 50_000, "0.1 % of 50 USDC");
+        assert_eq!(fee(l_for(1_500)), 2, "1.5 µUSDC rounds up");
+        assert_eq!(fee(1), 1, "floor 1 µUSDC");
+        assert_eq!(fee(0), 1, "floor applies to an empty long too");
+        // Equal notional on a 32-tick range pays the same fee.
+        let narrow_l = (50_000_000u128 << 64) / crate::tick_math::range_value_q64(-39_152, -39_120).unwrap();
+        assert_eq!(force_exercise_fee(narrow_l, -39_152, -39_120).unwrap(), 50_000);
     }
 }

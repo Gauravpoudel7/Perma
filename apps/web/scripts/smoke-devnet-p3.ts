@@ -7,8 +7,11 @@
  * --check reads the program length and runs the pool measure. No wallet, no txs.
  * --smoke refuses the pre-P3 ELF (594752), refuses a pool more than 200 bps from
  * Pyth, posts a Full Pyth update (or uses a sponsored account younger than 60s),
- * mints a small Short and Long near spot, closes the ephemeral Pyth accounts,
- * then Settle and Close. Settle/Close do not attach a price_update.
+ * mints a Short (~60 USDC of notional) and a Long (~50 USDC) on a 128-tick
+ * range around spot, closes the ephemeral Pyth accounts, waits ~150 slots,
+ * then Settle and Close. Settle/Close do not attach a price_update. It prints
+ * the premium the long actually paid next to the ticket's own estimate
+ * (ADR-0006: premium is priced on notional L·v).
  *
  * Env: SOLANA_RPC or ANCHOR_PROVIDER_URL, ANCHOR_WALLET, PYTH_API_KEY (not committed).
  * Refuses any cluster whose genesis hash is not Solana-devnet's.
@@ -30,6 +33,15 @@ import idl from "../src/idl/perma.json" with { type: "json" };
 import type { Perma } from "../src/idl/perma";
 import type { PermaWallet } from "../src/lib/perma";
 
+/** Host only: an RPC URL can carry an API key in its path or query. */
+const rpcHost = (u: string) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return "<rpc>";
+  }
+};
+
 process.env.NEXT_PUBLIC_CLUSTER ??= "devnet";
 process.env.NEXT_PUBLIC_RPC_URL ??=
   process.env.SOLANA_RPC ?? process.env.ANCHOR_PROVIDER_URL ?? "https://api.devnet.solana.com";
@@ -40,8 +52,11 @@ process.env.NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE ??= "1";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 const smoke = process.argv.includes("--smoke");
-const SHORT_LIQ = 100_000n;
-const LONG_LIQ = 10_000n;
+/** Notional sizes (µUSDC); the liquidity is derived from the range (ADR-0006). */
+const SHORT_NOTIONAL = 60_000_000n;
+const LONG_NOTIONAL = 50_000_000n;
+/** Long enough for 50 USDC at 0.01 %/h to owe a settleable amount (~0.55 µUSDC/slot). */
+const ACCRUE_SLOTS = 150;
 
 function fail(message: string): never {
   console.error(message);
@@ -84,7 +99,7 @@ async function main() {
   const { PRE_P3_PROGRAM_DATA_LEN, readProgramElfLen, resolveMintPriceUpdate } = await import("../src/lib/pythUpdate");
 
   const url = process.env.NEXT_PUBLIC_RPC_URL ?? "";
-  if (/mainnet/i.test(url)) fail(`smoke: refusing mainnet RPC ${url}`);
+  if (/mainnet/i.test(url)) fail(`smoke: refusing mainnet RPC ${rpcHost(url)}`);
   const connection = new Connection(url, "confirmed");
   const genesis = await connection.getGenesisHash();
   if (genesis !== DEVNET_GENESIS) fail(`smoke: cluster genesis ${genesis} is not Solana-devnet`);
@@ -125,6 +140,18 @@ async function main() {
   const tickLower = aligned - 8 * spacing;
   const tickUpper = aligned + 8 * spacing;
   console.log(`range        ticks ${tickLower} .. ${tickUpper} around spot tick ${spot.tickCurrentIndex}`);
+  const { rangeValueQ64 } = await import("../src/lib/tickMath");
+  const { estPremiumPerHour } = await import("../src/lib/solvency");
+  const { userCollateralPda } = await import("../src/lib/pda");
+  const v = rangeValueQ64(tickLower, tickUpper);
+  const SHORT_LIQ = (SHORT_NOTIONAL << 64n) / v;
+  const LONG_LIQ = (LONG_NOTIONAL << 64n) / v;
+  console.log(`sizes        short L ${SHORT_LIQ} (~60 USDC), long L ${LONG_LIQ} (~50 USDC), ${tickUpper - tickLower} ticks`);
+  const [ucPda] = userCollateralPda(market, payer.publicKey);
+  const freeUsdc = async () => BigInt((await program.account.userCollateral.fetch(ucPda)).balanceB.toString());
+  const slotOf = async (sig: string) =>
+    BigInt((await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }))!.slot);
+  let longMint: { slot: bigint; free: bigint } | null = null;
 
   async function sendIxs(ixs: TransactionInstruction[], extra: Signer[], label: string) {
     const tx = new Transaction().add(...ixs);
@@ -149,9 +176,9 @@ async function main() {
   if (!price.ok || !price.priceUpdate) fail(price.error ?? "smoke: Pyth update was not posted");
   console.log(`price_update ${price.priceUpdate.toBase58()}`);
 
-  const caps = slippageCappedTokenMax(SHORT_LIQ, spot.tickCurrentIndex, tickLower, tickUpper);
+  const caps = slippageCappedTokenMax(SHORT_LIQ, spot.sqrtPriceX64, tickLower, tickUpper);
   const needA = caps.tokenMaxA + caps.tokenMaxA / 10n + 1n;
-  const needB = caps.tokenMaxB + 1_000_000n;
+  const needB = caps.tokenMaxB + 3_000_000n; // + the long's ~1.12 USDC margin and its premium
   const ataA = getAssociatedTokenAddressSync(marketAccount.tokenMintA, payer.publicKey);
   const ataB = getAssociatedTokenAddressSync(marketAccount.tokenMintB, payer.publicKey);
   const bal = async (ata: PublicKey) =>
@@ -241,7 +268,10 @@ async function main() {
       ],
       [],
       "mint-long"
-    );
+    ).then(async (sig) => {
+      longMint = { slot: await slotOf(sig), free: await freeUsdc() };
+      return sig;
+    });
     longNonce = mintedLong;
   } finally {
     if (price.closeIxs.length > 0) {
@@ -253,6 +283,9 @@ async function main() {
       }
     }
     if (longNonce !== null) {
+      const target = (await connection.getSlot("confirmed")) + ACCRUE_SLOTS;
+      console.log(`accrue       waiting ${ACCRUE_SLOTS} slots before settling`);
+      while ((await connection.getSlot("confirmed")) < target) await new Promise((r) => setTimeout(r, 2_000));
       try {
         await sendIxs(
           [
@@ -288,7 +321,25 @@ async function main() {
           ],
           [],
           "close-long"
-        );
+        ).then(async (sig) => {
+          const minted = longMint;
+          if (!minted) return;
+          const closeSlot = await slotOf(sig);
+          const paid = minted.free - (await freeUsdc());
+          const perHour = estPremiumPerHour(
+            {
+              premiumRate: BigInt(marketAccount.premiumRate.toString()),
+              premiumMultiplier: BigInt(marketAccount.premiumMultiplier.toString()),
+            },
+            LONG_LIQ,
+            { tickLower, tickUpper }
+          );
+          const slots = closeSlot - minted.slot;
+          const estimate = Number(perHour) * (Number(slots) / 9_000);
+          console.log(
+            `premium      long paid ${paid} µUSDC over ${slots} slots; ticket estimate ${perHour} µUSDC/h -> ${estimate.toFixed(1)} µUSDC for those slots`
+          );
+        });
       } catch (err) {
         console.error("close-long failed", err);
       }

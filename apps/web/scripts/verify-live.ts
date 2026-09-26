@@ -19,6 +19,15 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { Keypair } from "@solana/web3.js";
 
+/** Host only: an RPC URL can carry an API key in its path or query. */
+const rpcHost = (u: string) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return "<rpc>";
+  }
+};
+
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "http://127.0.0.1:8899";
 const connection = new Connection(RPC_URL, "confirmed");
 
@@ -35,7 +44,7 @@ const provider = new AnchorProvider(connection, wallet as any, { commitment: "co
 const program = new Program<Perma>(idl as Perma, provider);
 
 async function main() {
-  console.log(`RPC: ${RPC_URL}`);
+  console.log(`RPC: ${rpcHost(RPC_URL)}`);
   console.log(`Wallet: ${keypair.publicKey.toBase58()}`);
 
   const [market] = marketPda(WHIRLPOOL);
@@ -92,6 +101,8 @@ async function main() {
         accruedScaled: BigInt(p.accruedScaled.toString()),
         entryIndex: BigInt(p.entryIndex.toString()),
         liquidity: BigInt(p.liquidity.toString()),
+        tickLower: p.tickLower,
+        tickUpper: p.tickUpper,
       })),
       0n,
       {

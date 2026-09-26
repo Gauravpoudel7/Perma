@@ -30,6 +30,7 @@ import {
 } from "@solana/spl-token";
 import { assert, AssertionError } from "chai";
 import { freshPrice } from "./oracle-mock";
+import { testPricing } from "./pricing";
 
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const PERMA_WHIRLPOOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -77,6 +78,7 @@ describe("events: decodable on-chain events (component 11)", () => {
   const program = anchor.workspace.Perma as Program;
   const conn = provider.connection;
   const me = provider.wallet.publicKey;
+  const pricing = testPricing(program, provider);
 
   const pda = (seeds: (Buffer | Uint8Array)[]) =>
     PublicKey.findProgramAddressSync(seeds, program.programId)[0];
@@ -380,6 +382,7 @@ describe("events: decodable on-chain events (component 11)", () => {
         })
         .rpc();
     }
+    await pricing.enable();
     await heal();
     const have = (await conn.getAccountInfo(collateralOf(me))) ? await uc() : { balanceA: new BN(0) };
     const hA = BigInt(have.balanceA.toString());
@@ -390,15 +393,16 @@ describe("events: decodable on-chain events (component 11)", () => {
     await ensureFreeB(USDC(250));
   });
 
-  it("every one of the 23 catalogued events is in the IDL with a discriminator", () => {
+  it("every one of the 24 catalogued events is in the IDL with a discriminator", () => {
     const names = (program.idl as any).events.map((e: any) => e.name).sort();
     // 19 Fair events + the two P1 admin events (`AdminTransferred`,
     // `RangeUnwound`) + the two P4 events (`LongLiquidated`,
-    // `LongForceExercised`). Additive only: nothing above was renamed or reordered.
-    assert.equal(names.length, 23);
+    // `LongForceExercised`) + the P5 `MarketPremiumParamsSet` (ADR-0006).
+    // Additive only: nothing above was renamed or reordered.
+    assert.equal(names.length, 24);
     for (const n of ["shortMinted", "longMinted", "shortBurned", "longBurned", "premiumSettled",
       "marketPauseSet", "marketPauseCleared", "marketRiskParamsSet",
-      "longLiquidated", "longForceExercised"]) {
+      "longLiquidated", "longForceExercised", "marketPremiumParamsSet"]) {
       assert.include(names, n);
     }
   });
@@ -508,5 +512,6 @@ describe("events: decodable on-chain events (component 11)", () => {
     assert.isFalse(await isPaused(), "suite must leave the market unpaused");
     const r = await rangeOf();
     assert.equal(r.totalLongLiquidity.toString(), "0", "suite must leave no longs");
+    await pricing.restore();
   });
 });

@@ -35,6 +35,7 @@ import {
 } from "@solana/spl-token";
 import { assert, AssertionError } from "chai";
 import { freshPrice } from "./oracle-mock";
+import { liquidityFor, testMargin, testPricing } from "./pricing";
 
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const PERMA_WHIRLPOOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -64,9 +65,6 @@ const MAX_A = new BN(1_000_000_000);
 const MAX_B = new BN(100_000_000);
 
 /** `state::risk_defaults` + `premium_defaults`; asserted by tests/factory.ts. */
-const PREMIUM_RATE = 1_000_000n;
-const PREMIUM_MULTIPLIER = 1_000n;
-const PREMIUM_SCALE = 1_000_000_000_000n;
 const HORIZON = 1_000n;
 const BUFFER = 1_000_000n;
 const MAX_OPEN_LONGS = 8;
@@ -87,6 +85,7 @@ describe("risk-solvency: long premium liability + margin (component 09)", () => 
   const program = anchor.workspace.Perma as Program;
   const conn = provider.connection;
   const me = provider.wallet.publicKey;
+  const pricing = testPricing(program, provider);
 
   const pda = (seeds: (Buffer | Uint8Array)[]) =>
     PublicKey.findProgramAddressSync(seeds, program.programId)[0];
@@ -285,10 +284,8 @@ describe("risk-solvency: long premium liability + margin (component 09)", () => 
     const r = await rangeOf();
     return BigInt(r.totalShortLiquidity.toString()) - BigInt(r.totalLongLiquidity.toString());
   };
-  const requiredMargin = (L: bigint) => {
-    const scaled = HORIZON * PREMIUM_RATE * L * PREMIUM_MULTIPLIER;
-    return scaled / PREMIUM_SCALE + (scaled % PREMIUM_SCALE === 0n ? 0n : 1n) + BUFFER;
-  };
+  /** ADR-0006 test pricing: ⌈notional⌉ + 1 USDC on the demo range. */
+  const requiredMargin = (L: bigint) => testMargin(L, TICK_LOWER, TICK_UPPER);
   const waitSlots = async (k = 3) => {
     const from = await conn.getSlot("confirmed");
     while ((await conn.getSlot("confirmed")) < from + k) await new Promise((r) => setTimeout(r, 400));
@@ -329,6 +326,7 @@ describe("risk-solvency: long premium liability + margin (component 09)", () => 
         })
         .rpc();
     }
+    await pricing.enable();
 
     // Me: enough WSOL for one seed short, and USDC headroom for the longs below.
     const have = (await conn.getAccountInfo(collateralOf(me))) ? await uc() : { balanceA: new BN(0) };
@@ -361,12 +359,12 @@ describe("risk-solvency: long premium liability + margin (component 09)", () => 
     await mintShort(seedShort);
   });
 
-  it("the market carries the demo margin parameters", async () => {
+  it("the market carries the test margin parameters", async () => {
     const m = await (program.account as any).market.fetch(market);
     assert.equal(BigInt(m.longMarginHorizonSlots.toString()), HORIZON);
     assert.equal(BigInt(m.longMarginBufferUsdc.toString()), BUFFER);
-    // The demo coincidence, stated once: margin(L) == L + 1 USDC.
-    assert.equal(requiredMargin(50_000_000n), 51_000_000n);
+    // Test pricing, stated once: margin = ⌈notional⌉ + 1 USDC (ADR-0006).
+    assert.equal(requiredMargin(liquidityFor(50_000_000n, TICK_LOWER, TICK_UPPER)), 51_000_000n);
   });
 
   it("R1: a user with 1 µUSDC cannot open a long (the old stub let them)", async () => {
@@ -559,5 +557,6 @@ describe("risk-solvency: long premium liability + margin (component 09)", () => 
     }
     const r = await rangeOf();
     assert.equal(r.totalLongLiquidity.toString(), "0", "suite must leave no longs");
+    await pricing.restore();
   });
 });
