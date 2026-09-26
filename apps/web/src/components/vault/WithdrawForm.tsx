@@ -2,7 +2,12 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  createCloseAccountInstruction,
+  getAssociatedTokenAddressSync,
+  NATIVE_MINT,
+} from "@solana/spl-token";
 import { NumberInput } from "../primitives/NumberInput";
 import { Button } from "../primitives/Button";
 import { SolvencyBlock, InsufficientBlock } from "./SolvencyBlock";
@@ -15,10 +20,17 @@ import { useRequiredFreeUsdc } from "../../hooks/useRequiredFreeUsdc";
 import { buildWithdrawCollateralIx } from "../../lib/perma";
 import { canWithdraw } from "../../lib/solvency";
 import { formatBaseUnits, parseToBaseUnits } from "../../lib/format";
+import { cleanAmountInput } from "../../lib/ticketSize";
 
+const DECIMALS_A = 9;
 const DECIMALS_B = 6;
 
-/** COPY-DECK §4.3: CTA "Withdraw"; solvency-blocked live via `lib/solvency.ts`. */
+/**
+ * COPY-DECK §4.3: CTA "Withdraw"; solvency-blocked live via `lib/solvency.ts`.
+ * SOL and USDC both leave here. SOL arrives unwrapped (the WSOL account is
+ * closed back to the wallet), mirroring the Deposit form's wrap. Only USDC
+ * backs longs, so only USDC is solvency-gated; SOL is limited by free SOL.
+ */
 export function WithdrawForm() {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
@@ -29,6 +41,9 @@ export function WithdrawForm() {
   const marketPubkey = useChainStore((s) => s.marketPubkey);
   const view = useRequiredFreeUsdc();
   const [amount, setAmount] = useState("");
+  const [amountSol, setAmountSol] = useState("");
+  const userCollateral = useChainStore((s) => s.userCollateral);
+  const freeSol = userCollateral ? BigInt(userCollateral.balanceA.toString()) : null;
   const [busy, setBusy] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const ctaRef = useRef<HTMLButtonElement>(null);
@@ -38,10 +53,13 @@ export function WithdrawForm() {
   const preflight = useMemo(() => {
     if (!view) return { ok: true, reason: null as "insufficient" | "solvency" | null };
     const amountB = parseToBaseUnits(amount || "0", DECIMALS_B);
-    if (amountB > view.freeUsdc) return { ok: false, reason: "insufficient" as const };
+    const amountA = parseToBaseUnits(amountSol || "0", DECIMALS_A);
+    if (amountB > view.freeUsdc || (freeSol !== null && amountA > freeSol)) {
+      return { ok: false, reason: "insufficient" as const };
+    }
     if (!canWithdraw(view.freeUsdc, amountB, view.required)) return { ok: false, reason: "solvency" as const };
     return { ok: true, reason: null as "insufficient" | "solvency" | null };
-  }, [view, amount]);
+  }, [view, amount, amountSol, freeSol]);
 
   // What can leave while every open long stays covered — `free − required`, floored at 0.
   const withdrawable = view ? (view.freeUsdc > view.required ? view.freeUsdc - view.required : 0n) : null;
@@ -51,6 +69,7 @@ export function WithdrawForm() {
     setBusy(true);
     try {
       const amountB = parseToBaseUnits(amount, DECIMALS_B);
+      const amountA = parseToBaseUnits(amountSol, DECIMALS_A);
       const userTokenA = getAssociatedTokenAddressSync(market.tokenMintA, publicKey);
       const userTokenB = getAssociatedTokenAddressSync(market.tokenMintB, publicKey);
 
@@ -65,19 +84,31 @@ export function WithdrawForm() {
         userTokenB,
         vaultA: market.vaultA,
         vaultB: market.vaultB,
-        amountA: 0n,
+        amountA,
         amountB,
         openLongs: freshOpenLongs,
       });
-      const sig = await send([ix], { successMessage: "Withdrawal confirmed." });
+      // Both token accounts must exist to receive; closing the WSOL account
+      // afterwards hands the wallet native SOL, as Deposit took it.
+      const unwrap = amountA > 0n && market.tokenMintA.equals(NATIVE_MINT);
+      const sig = await send(
+        [
+          createAssociatedTokenAccountIdempotentInstruction(publicKey, userTokenA, publicKey, market.tokenMintA),
+          createAssociatedTokenAccountIdempotentInstruction(publicKey, userTokenB, publicKey, market.tokenMintB),
+          ix,
+          ...(unwrap ? [createCloseAccountInstruction(userTokenA, publicKey, publicKey)] : []),
+        ],
+        { successMessage: "Withdrawal confirmed." }
+      );
       if (!sig) return;
       setAmount("");
+      setAmountSol("");
     } finally {
       setBusy(false);
     }
   }
 
-  const hasAmount = !!amount && Number(amount) > 0;
+  const hasAmount = parseToBaseUnits(amount, DECIMALS_B) > 0n || parseToBaseUnits(amountSol, DECIMALS_A) > 0n;
   const disabledReason = !canTransact ? reason : !hasAmount ? "Enter an amount." : null;
   const disabled = disabledReason !== null || busy || !preflight.ok;
 
@@ -87,9 +118,11 @@ export function WithdrawForm() {
   }
 
   const amountB = parseToBaseUnits(amount || "0", DECIMALS_B);
+  const amountA = parseToBaseUnits(amountSol || "0", DECIMALS_A);
   const rows = view
     ? [
-        { label: "Amount", value: `${formatBaseUnits(amountB, DECIMALS_B, 6)} USDC` },
+        { label: "SOL (unwrapped to your wallet)", value: `${formatBaseUnits(amountA, DECIMALS_A, 9)} SOL` },
+        { label: "USDC", value: `${formatBaseUnits(amountB, DECIMALS_B, 6)} USDC` },
         { label: "Free USDC after", value: `${formatBaseUnits(view.freeUsdc - amountB, DECIMALS_B, 6)} USDC` },
         {
           label: "Required free USDC",
@@ -104,6 +137,29 @@ export function WithdrawForm() {
       <h2 className="text-h4 text-text-primary">Withdraw</h2>
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
+          <label htmlFor="withdraw-sol" className="text-body-sm block text-text-muted">
+            SOL (unwrapped on withdraw)
+          </label>
+          {freeSol !== null && (
+            <button
+              type="button"
+              className="transition-brand focus-ring text-mono-sm tabular-nums rounded-sm border border-border px-2 py-1 text-text-muted hover:border-text-primary hover:text-text-primary"
+              aria-label="Max SOL"
+              onClick={() => setAmountSol(formatBaseUnits(freeSol, DECIMALS_A))}
+            >
+              Max
+            </button>
+          )}
+        </div>
+        <NumberInput
+          id="withdraw-sol"
+          placeholder="0.00 SOL"
+          value={amountSol}
+          onChange={(e) => setAmountSol(cleanAmountInput(e.target.value, "sol"))}
+        />
+      </div>
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-2">
           <label htmlFor="withdraw-usdc" className="text-body-sm block text-text-muted">
             USDC
           </label>
@@ -111,6 +167,7 @@ export function WithdrawForm() {
             <button
               type="button"
               className="transition-brand focus-ring text-mono-sm tabular-nums rounded-sm border border-border px-2 py-1 text-text-muted hover:border-text-primary hover:text-text-primary"
+              aria-label="Max USDC"
               onClick={() => setAmount(formatBaseUnits(withdrawable, DECIMALS_B, 6))}
             >
               Max
@@ -121,7 +178,7 @@ export function WithdrawForm() {
           id="withdraw-usdc"
           placeholder="0.00 USDC"
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          onChange={(e) => setAmount(cleanAmountInput(e.target.value, "usdc"))}
         />
         {withdrawable !== null && (
           <p className="text-body-sm mt-2 text-text-muted">

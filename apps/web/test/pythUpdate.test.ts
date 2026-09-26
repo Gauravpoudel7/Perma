@@ -4,8 +4,10 @@ import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import {
   DEVNET_SOL_USD_PRICE_UPDATE_ADDRESS,
   LOCALNET_MOCK_PRICE_UPDATE_ADDRESS,
+  PERMA_PROGRAM_ID,
   defaultPriceUpdateAddress,
   mintExpectsPriceUpdate,
+  PRICE_UPDATE,
 } from "../src/lib/constants";
 import {
   DEVNET_SPONSORED_SOL_USD,
@@ -18,6 +20,11 @@ import {
   WORMHOLE_PROGRAM_ID,
   buildPostUpdatePlan,
   fetchHermesSolUsd,
+  messagePublishTime,
+  resolveMintPriceUpdate,
+  planMintPriceUpdate,
+  shouldRepost,
+  REPOST_AGE_SECS,
   mintPostsFreshPyth,
   parseAccumulatorUpdate,
   programDataAddress,
@@ -56,10 +63,11 @@ function accumulator(vaa: Buffer, message: Buffer, proofs: Buffer[]): Buffer {
   ]);
 }
 
-function priceMessage(): Buffer {
-  const message = Buffer.alloc(33);
+function priceMessage(publishTime = 0): Buffer {
+  const message = Buffer.alloc(61);
   message[0] = 0;
   FEED.copy(message, 1);
+  message.writeBigInt64BE(BigInt(publishTime), 53);
   return message;
 }
 
@@ -207,8 +215,156 @@ describe("Hermes accumulator and post_update", () => {
     expect(calls[1]).toContain("ids%5B%5D=0xef0d8b6f");
   });
 
+  it("never lets Next cache the Hermes response", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ binary: { data: [Buffer.from("pyth").toString("base64")] } }), { status: 200 })
+    );
+    await fetchHermesSolUsd({ fetchImpl, apiKey: "test-key" });
+    expect(fetchImpl.mock.calls[0]?.[1]?.cache).toBe("no-store");
+  });
+
   it("names the missing key when every Hermes host refuses", async () => {
     const fetchImpl = vi.fn(async () => new Response("unauthorized", { status: 401 }));
     await expect(fetchHermesSolUsd({ fetchImpl })).rejects.toThrow(/PYTH_API_KEY/);
+  });
+});
+
+describe("resolveMintPriceUpdate on Solana-devnet", () => {
+  const NOW = 1_790_163_650;
+  const vaa = Buffer.alloc(80);
+  vaa[0] = 1;
+  vaa.writeUInt32BE(3, 1);
+  const connection = {
+    getAccountInfo: async (pk: PublicKey) => {
+      // Program account -> program data with a P3-sized ELF; the sponsored feed is missing.
+      if (pk.equals(PERMA_PROGRAM_ID)) {
+        const d = Buffer.alloc(36);
+        d.writeUInt32LE(2, 0);
+        ADMIN.toBuffer().copy(d, 4);
+        return { data: d, owner: PublicKey.default };
+      }
+      if (pk.equals(ADMIN)) {
+        const d = Buffer.alloc(45 + 604_992);
+        d.writeUInt32LE(3, 0);
+        d[12] = 1;
+        return { data: d, owner: PublicKey.default };
+      }
+      return null;
+    },
+    getMinimumBalanceForRentExemption: async () => 1_000_000,
+  } as never;
+
+  function run(publishTime: number) {
+    const sendTx = vi.fn(async () => "sig");
+    const sendTxs = vi.fn(async (_txs: unknown[], _msg: string) => true);
+    const result = resolveMintPriceUpdate({
+      connection,
+      payer: ADMIN,
+      cluster: "devnet",
+      flag: "1",
+      nowSecs: NOW,
+      fetchUpdate: async () => accumulator(vaa, priceMessage(publishTime), [Buffer.alloc(20, 9)]),
+      sendTx,
+      sendTxs,
+    });
+    return { result, sendTx, sendTxs };
+  }
+
+  it("refuses a cached Hermes update before any wallet prompt", async () => {
+    const { result, sendTx, sendTxs } = run(NOW - 120);
+    const r = await result;
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/120 seconds old/);
+    expect(sendTx).not.toHaveBeenCalled();
+    expect(sendTxs).not.toHaveBeenCalled();
+  });
+
+  it("posts a fresh update behind one approval", async () => {
+    const { result, sendTx, sendTxs } = run(NOW - 2);
+    const r = await result;
+    expect(r.ok).toBe(true);
+    expect(sendTxs).toHaveBeenCalledTimes(1);
+    expect(sendTxs.mock.calls[0]?.[0]).toHaveLength(3);
+    expect(sendTx).not.toHaveBeenCalled();
+    expect(messagePublishTime(priceMessage(NOW))).toBe(NOW);
+  });
+});
+
+describe("planMintPriceUpdate: fresh vs stale", () => {
+  const NOW = 1_790_163_650;
+  const vaa = Buffer.alloc(80);
+  vaa[0] = 1;
+  vaa.writeUInt32BE(3, 1);
+
+  /** A receiver-owned Full SOL/USD PriceUpdateV2 published at `publishTime`. */
+  function sponsored(publishTime: number) {
+    const d = Buffer.alloc(133);
+    Buffer.from([34, 241, 35, 99, 157, 126, 244, 205]).copy(d, 0);
+    d[40] = 1;
+    FEED.copy(d, 41);
+    d.writeBigInt64LE(11_600_000_000n, 73);
+    d.writeInt32LE(-8, 89);
+    d.writeBigInt64LE(BigInt(publishTime), 93);
+    return { data: d, owner: PYTH_RECEIVER_PROGRAM_ID };
+  }
+  function connectionWith(sponsoredPublishTime: number | null) {
+    return {
+      getAccountInfo: async (pk: PublicKey) => {
+        if (pk.equals(PERMA_PROGRAM_ID)) {
+          const d = Buffer.alloc(36);
+          d.writeUInt32LE(2, 0);
+          ADMIN.toBuffer().copy(d, 4);
+          return { data: d, owner: PublicKey.default };
+        }
+        if (pk.equals(ADMIN)) {
+          const d = Buffer.alloc(45 + 604_992);
+          d.writeUInt32LE(3, 0);
+          d[12] = 1;
+          return { data: d, owner: PublicKey.default };
+        }
+        if (pk.equals(PRICE_UPDATE) && sponsoredPublishTime !== null) return sponsored(sponsoredPublishTime);
+        return null;
+      },
+      getMinimumBalanceForRentExemption: async () => 1_000_000,
+    } as never;
+  }
+  const plan = (sponsoredPublishTime: number | null) =>
+    planMintPriceUpdate({
+      connection: connectionWith(sponsoredPublishTime),
+      payer: ADMIN,
+      cluster: "devnet",
+      flag: "1",
+      nowSecs: NOW,
+      fetchUpdate: async () => accumulator(vaa, priceMessage(NOW - 1), [Buffer.alloc(20, 9)]),
+    });
+
+  it("uses a sponsored price with signing time left, and posts nothing", async () => {
+    const r = await plan(NOW - 10);
+    expect(r).toMatchObject({ ok: true, post: null });
+    if (r.ok) expect(r.priceUpdate.equals(PRICE_UPDATE)).toBe(true);
+  });
+
+  it("plans a post when the sponsored price is too old to sign against (45 s), though the chain allows 60", async () => {
+    const r = await plan(NOW - 50);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.post).not.toBeNull();
+      expect(r.priceUpdate.equals(PRICE_UPDATE)).toBe(false);
+      expect(r.post!.closeIxs).toHaveLength(2);
+    }
+  });
+
+  it("plans a post when there is no sponsored account at all", async () => {
+    const r = await plan(null);
+    expect(r.ok && r.post !== null).toBe(true);
+  });
+});
+
+describe("shouldRepost", () => {
+  it("re-posts from 45 s of age, under the program's 60 s limit", () => {
+    expect(REPOST_AGE_SECS).toBe(45);
+    expect(shouldRepost(1000, 1044)).toBe(false);
+    expect(shouldRepost(1000, 1045)).toBe(true);
+    expect(shouldRepost(1000, 1060)).toBe(true);
   });
 });

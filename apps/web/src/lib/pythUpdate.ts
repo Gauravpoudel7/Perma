@@ -218,6 +218,12 @@ export function solUsdUpdate(parsed: AccumulatorUpdate): { message: Buffer; proo
   return found;
 }
 
+/** `publish_time` of a PriceFeedMessage: type 1 + feed 32 + price 8 + conf 8 + expo 4, then i64 BE. */
+export function messagePublishTime(message: Buffer): number {
+  if (message.length < 61) throw new Error("Pyth price message is too short.");
+  return Number(message.readBigInt64BE(53));
+}
+
 export function splitVaa(vaa: Buffer, first = VAA_FIRST_CHUNK, next = VAA_NEXT_CHUNK): Buffer[] {
   if (vaa.length < 6) throw new Error("Pyth update VAA is too short.");
   const out: Buffer[] = [];
@@ -388,7 +394,9 @@ export async function fetchHermesSolUsd(opts?: {
     url.searchParams.set("encoding", "base64");
     let response: Response;
     try {
-      response = await fetchImpl(url, { headers });
+      // Next 14 caches server `fetch` by default. A cached update is minutes old
+      // and every mint built on it fails the 60 s staleness gate.
+      response = await fetchImpl(url, { headers, cache: "no-store" });
     } catch (err) {
       failures.push(`${base} (${err instanceof Error ? err.message : "request failed"})`);
       continue;
@@ -416,7 +424,7 @@ export async function fetchHermesSolUsd(opts?: {
 }
 
 export async function fetchHermesViaApp(fetchImpl: typeof fetch = fetch): Promise<Buffer> {
-  const response = await fetchImpl("/api/pyth/sol-usd");
+  const response = await fetchImpl("/api/pyth/sol-usd", { cache: "no-store" });
   const body = (await response.json().catch(() => ({}))) as { data?: unknown; error?: unknown };
   if (!response.ok || typeof body.data !== "string" || body.data.length === 0) {
     const detail = typeof body.error === "string" ? body.error : `Hermes proxy failed (${response.status}).`;
@@ -431,6 +439,10 @@ export const PRE_P3_MINT_ERROR =
 export const STALE_PYTH_ERROR =
   "The Pyth price on Solana-devnet is older than 60 seconds, and Hermes did not return an update. Set PYTH_API_KEY in apps/web/.env.local (do not commit it) and retry. Nothing was opened.";
 
+export function staleHermesError(ageSecs: number): string {
+  return `Hermes returned a SOL/USD update ${ageSecs} seconds old, and PERMA rejects prices older than ${MAX_STALENESS_SECS}. Nothing was sent. Retry in a moment.`;
+}
+
 export interface MintPriceResult {
   ok: boolean;
   priceUpdate: PublicKey | null;
@@ -439,35 +451,43 @@ export interface MintPriceResult {
   alreadyToasted?: boolean;
 }
 
+/** What a mint needs before it can be sent. Nothing here sends a transaction. */
+export type MintPricePlan =
+  | { ok: true; priceUpdate: PublicKey; post: PostUpdatePlan | null }
+  | { ok: false; error: string };
+
 /**
  * Localnet: the mock feed, no post. Solana-devnet with the flag off: the
  * configured account, and the mint builder drops it. Solana-devnet with the
- * flag on: a fresh Full update. A sponsored account younger than 60 seconds
- * is used as-is. Otherwise Hermes is posted via `post_update` first.
+ * flag on: a sponsored account younger than 60 seconds is used as-is,
+ * otherwise a fresh Hermes update is planned as `post_update` transactions
+ * for the caller to sign together with the mint.
  */
-export async function resolveMintPriceUpdate(args: {
+export async function planMintPriceUpdate(args: {
   connection: Connection;
   payer: PublicKey;
-  sendTx: (ixs: TransactionInstruction[], signers: Signer[], successMessage: string) => Promise<string | null>;
   cluster?: string;
   flag?: string;
   fetchUpdate?: () => Promise<Buffer>;
   nowSecs?: number;
-}): Promise<MintPriceResult> {
+}): Promise<MintPricePlan> {
   const cluster = args.cluster ?? process.env.NEXT_PUBLIC_CLUSTER ?? "localnet";
   const flag = args.flag ?? process.env.NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE;
   if (!mintPostsFreshPyth(cluster, flag)) {
-    return { ok: true, priceUpdate: PRICE_UPDATE, closeIxs: [] };
+    return { ok: true, priceUpdate: PRICE_UPDATE, post: null };
   }
   const elfLen = await readProgramElfLen(args.connection, PERMA_PROGRAM_ID);
   if (elfLen === PRE_P3_PROGRAM_DATA_LEN) {
-    return { ok: false, priceUpdate: null, closeIxs: [], error: PRE_P3_MINT_ERROR };
+    return { ok: false, error: PRE_P3_MINT_ERROR };
   }
   const configured = PRICE_UPDATE;
   const info = await args.connection.getAccountInfo(configured);
   const now = args.nowSecs ?? Math.floor(Date.now() / 1000);
   const view = info ? readPriceUpdateAccount(info.data, info.owner, now) : null;
-  if (view?.fresh) return { ok: true, priceUpdate: configured, closeIxs: [] };
+  // Sponsored and fresh, with room to sign: use it. Near the limit, post our own.
+  if (view?.fresh && !shouldRepost(view.publishTime, now)) {
+    return { ok: true, priceUpdate: configured, post: null };
+  }
 
   let bytes: Buffer;
   try {
@@ -480,14 +500,68 @@ export async function resolveMintPriceUpdate(args: {
     bytes = await load();
   } catch (err) {
     const detail = err instanceof Error ? err.message : STALE_PYTH_ERROR;
-    return { ok: false, priceUpdate: null, closeIxs: [], error: detail.includes("PYTH_API_KEY") ? detail : STALE_PYTH_ERROR };
+    return { ok: false, error: detail.includes("PYTH_API_KEY") ? detail : STALE_PYTH_ERROR };
   }
 
-  const plan = await buildPostUpdatePlan({
+  // Half the on-chain limit: the rest is for signing and the mint itself.
+  const ageSecs = now - messagePublishTime(solUsdUpdate(parseAccumulatorUpdate(bytes)).message);
+  if (ageSecs > MAX_STALENESS_SECS / 2) {
+    return { ok: false, error: staleHermesError(ageSecs) };
+  }
+
+  const post = await buildPostUpdatePlan({
     payer: args.payer,
     update: bytes,
     rentLamports: (space) => args.connection.getMinimumBalanceForRentExemption(space),
   });
+  return { ok: true, priceUpdate: post.priceUpdate, post };
+}
+
+/**
+ * Re-post threshold, in seconds of price age. The chain allows 60; below 45
+ * there is still time to confirm the mint, above it a mint would likely land stale.
+ */
+export const REPOST_AGE_SECS = 45;
+
+/** True when a price published at `publishTime` is too old to send a mint against. */
+export function shouldRepost(publishTime: number, nowSecs: number, limitSecs = REPOST_AGE_SECS): boolean {
+  return nowSecs - publishTime >= limitSecs;
+}
+
+/** Age of a posted `PriceUpdateV2`, or null when the account is missing or unusable. */
+export async function readPriceAge(
+  connection: Connection,
+  priceUpdate: PublicKey,
+  nowSecs = Math.floor(Date.now() / 1000)
+): Promise<PriceUpdateView | null> {
+  const info = await connection.getAccountInfo(priceUpdate, "confirmed");
+  return info ? readPriceUpdateAccount(info.data, info.owner, nowSecs) : null;
+}
+
+/**
+ * `planMintPriceUpdate` plus sending the post, for scripts. The web app signs
+ * the post together with the mint instead (`hooks/useOpenPosition.ts`).
+ */
+export async function resolveMintPriceUpdate(args: {
+  connection: Connection;
+  payer: PublicKey;
+  sendTx: (ixs: TransactionInstruction[], signers: Signer[], successMessage: string) => Promise<string | null>;
+  /** Optional: send every post transaction behind one wallet approval, in order. */
+  sendTxs?: (txs: SignedIxs[], successMessage: string) => Promise<boolean>;
+  cluster?: string;
+  flag?: string;
+  fetchUpdate?: () => Promise<Buffer>;
+  nowSecs?: number;
+}): Promise<MintPriceResult> {
+  const planned = await planMintPriceUpdate(args);
+  if (!planned.ok) return { ok: false, priceUpdate: null, closeIxs: [], error: planned.error };
+  const plan = planned.post;
+  if (!plan) return { ok: true, priceUpdate: planned.priceUpdate, closeIxs: [] };
+  if (args.sendTxs) {
+    const sent = await args.sendTxs(plan.txs, "Pyth price posted.");
+    if (!sent) return { ok: false, priceUpdate: null, closeIxs: plan.closeIxs, alreadyToasted: true };
+    return { ok: true, priceUpdate: plan.priceUpdate, closeIxs: plan.closeIxs };
+  }
   for (let i = 0; i < plan.txs.length; i++) {
     const tx = plan.txs[i];
     if (!tx) continue;

@@ -33,7 +33,7 @@ export function TopBar() {
         <p className="text-body-sm hidden text-text-muted md:block">SOL/USDC · Orca Whirlpool</p>
         <p className="text-mono-sm tabular-nums whitespace-nowrap text-text-muted">
           <span className="text-caption">Spot </span>
-          <span className="text-text-primary">{price !== null ? price.toFixed(4) : "—"}</span> USDC
+          <span className="text-text-primary">{price !== null ? price.toFixed(4) : "—"}</span> USDC/SOL
         </p>
         {market && (
           // "Active" is the quiet default and is hidden on phones to keep one

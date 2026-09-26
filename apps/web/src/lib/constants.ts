@@ -75,26 +75,23 @@ export function defaultPriceUpdateAddress(
 /**
  * Pyth `PriceUpdateV2` (SOL/USD) for a P3 `mint_position` (ADR-0004).
  * `mintExpectsPriceUpdate` decides whether a mint includes this key.
- * On Solana-devnet with the flag on, `resolveMintPriceUpdate` may replace it
- * with a `post_update` account posted in an earlier transaction.
+ * On Solana-devnet with the flag on, `planMintPriceUpdate` may replace it
+ * with a `post_update` account signed together with the mint.
  */
 export const PRICE_UPDATE = new PublicKey(defaultPriceUpdateAddress());
 
 /**
  * Whether `mint_position` must include the P3 `price_update` account.
  *
- * The checked-in IDL is P3: `price_update` is a required named account. The
- * program currently running on Solana-devnet is the pre-P3 build and has no
- * such account. Anchor still appends the meta, the program reads it as
- * `remaining_accounts`, and the mint fails with UnexpectedRemainingAccounts
- * (6024) before the transaction lands. Localnet runs the P3 program, so
- * localnet mints keep the account.
+ * The checked-in IDL is P3: `price_update` is a required named account. A
+ * pre-P3 program has no such account: Anchor still appends the meta, the
+ * program reads it as `remaining_accounts`, and the mint fails with
+ * UnexpectedRemainingAccounts (6024) before the transaction lands.
  *
- * Default: include on every cluster except `devnet`. The live Solana-devnet
- * program is still pre-P3 until the operator runs `scripts/upgrade-devnet-p3.mjs`
- * (`docs/audits/IMPL-P3-DEVNET-UPGRADE.md`). After that upgrade, set
- * `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`. `=0` forces the pre-P3 account
- * list on any cluster (including localnet).
+ * Default: include on every cluster except `devnet`. Solana-devnet runs P3
+ * since 2026-09-25 (`docs/audits/P3-DEVNET-POOL-PRICE.md`), so a devnet
+ * build sets `NEXT_PUBLIC_MINT_EXPECTS_PRICE_UPDATE=1`. `=0` forces the
+ * pre-P3 account list on any cluster (including localnet).
  *
  * `process.env.NEXT_PUBLIC_*` is read as a static property access so Next
  * inlines it into the client bundle. See the note on `requireEnv`.

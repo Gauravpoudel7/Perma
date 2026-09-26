@@ -67,3 +67,59 @@ export function slippageCappedTokenMax(
     tokenMaxB: BigInt(Math.ceil(amountB * factor)),
   };
 }
+
+// --- Size in tokens (the ticket's input) ------------------------------------
+//
+// The inverse of `amountsForLiquidity`: the trader types a token amount, the
+// ticket sends the liquidity `L` that uses at most that much. Same float
+// estimate, same caveat: Orca's CPI decides the real fill, and the mint's
+// `token_max_*` caps (above) bound it.
+
+export type TokenSide = "sol" | "usdc";
+
+/** Which tokens a range holds at the current tick: SOL above spot, USDC below, both around it. */
+export function rangeComposition(tickCurrent: number, tickLower: number, tickUpper: number): TokenSide | "both" {
+  if (tickCurrent < tickLower) return "sol";
+  if (tickCurrent >= tickUpper) return "usdc";
+  return "both";
+}
+
+/**
+ * Largest `L` whose `amountsForLiquidity` needs no more than `amount` base
+ * units of `token`. 0n when the token plays no part in this range at this tick
+ * (e.g. USDC for a range entirely above spot), or when the amount is too small
+ * to buy one unit of liquidity.
+ */
+export function liquidityForAmount(
+  token: TokenSide,
+  amount: bigint,
+  tickCurrent: number,
+  tickLower: number,
+  tickUpper: number
+): bigint {
+  if (amount <= 0n) return 0n;
+  const composition = rangeComposition(tickCurrent, tickLower, tickUpper);
+  if (composition !== "both" && composition !== token) return 0n;
+  const sqrtLower = sqrtPriceAtTick(tickLower);
+  const sqrtUpper = sqrtPriceAtTick(tickUpper);
+  const sqrtCurrent = sqrtPriceAtTick(Math.min(Math.max(tickCurrent, tickLower), tickUpper));
+  const perUnit =
+    token === "sol"
+      ? 1 / (composition === "both" ? sqrtCurrent : sqrtLower) - 1 / sqrtUpper
+      : (composition === "both" ? sqrtCurrent : sqrtUpper) - sqrtLower;
+  if (!(perUnit > 0)) return 0n;
+  // Floor, then step back while float error would make the round trip overshoot.
+  let L = BigInt(Math.floor(Number(amount) / perUnit));
+  while (L > 0n) {
+    const back = amountsForLiquidity(Number(L), tickCurrent, tickLower, tickUpper);
+    if ((token === "sol" ? back.amountA : back.amountB) <= Number(amount)) break;
+    L -= 1n;
+  }
+  return L;
+}
+
+/** What `liquidity` stands for at `tickCurrent`, floored to base units. Portfolio shows positions with it. */
+export function positionAmounts(liquidity: bigint, tickCurrent: number, tickLower: number, tickUpper: number) {
+  const { amountA, amountB } = amountsForLiquidity(Number(liquidity), tickCurrent, tickLower, tickUpper);
+  return { amountA: BigInt(Math.floor(amountA)), amountB: BigInt(Math.floor(amountB)) };
+}

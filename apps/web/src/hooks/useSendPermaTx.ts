@@ -14,6 +14,7 @@ import {
 import { parseAnchorError } from "../lib/errors";
 import { premiumIndexPda, rangeStatePda } from "../lib/pda";
 import { describeEvents, fetchTxEvents, slicesTouchedBy, type PermaEvent } from "../lib/events";
+import { failedPrefix, runSequence, sequenceToast, stepLabel, type SequenceResult, type SequenceStep } from "../lib/txSequence";
 import { useChainStore } from "../store/useChainStore";
 import { useToastStore } from "../store/useToastStore";
 
@@ -31,6 +32,9 @@ import { useToastStore } from "../store/useToastStore";
  *    refetch on top of the unconditional collateral + positions refetch, and
  *    they name what happened on the toast. If decoding yields nothing, the
  *    behavior is exactly the pre-11 one; polling is never replaced.
+ * 1b. simulate first. A wallet that simulates on its own (Phantom) reports a
+ *    program error as "Unexpected error" with no logs; our own simulation
+ *    keeps the logs, so `lib/errors.ts` can name the real error.
  * 4. on failure: map the error via `lib/errors.ts` and show
  *    "Transaction failed: {program error}. Nothing was changed." with a
  *    "View transaction" link only if a signature actually exists (a
@@ -38,7 +42,7 @@ import { useToastStore } from "../store/useToastStore";
  */
 export function useSendPermaTx() {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signAllTransactions } = useWallet();
   const program = usePermaProgram();
   const push = useToastStore((s) => s.push);
   const update = useToastStore((s) => s.update);
@@ -104,6 +108,14 @@ export function useSendPermaTx() {
         tx.feePayer = publicKey;
         if (opts.extraSigners?.length) tx.partialSign(...opts.extraSigners);
 
+        // Unsigned simulation (sigVerify off). An RPC hiccup here is not a verdict: send anyway.
+        const sim = await connection.simulateTransaction(tx).catch(() => null);
+        if (sim?.value.err) {
+          throw Object.assign(new Error(`Simulation failed: ${JSON.stringify(sim.value.err)}`), {
+            logs: sim.value.logs ?? [],
+          });
+        }
+
         const signature = await sendTransaction(tx, connection, {
           signers: opts.extraSigners,
         });
@@ -124,7 +136,7 @@ export function useSendPermaTx() {
         const signature = (e as { signature?: string })?.signature;
         update(toastId, {
           variant: "error",
-          message: `Transaction failed: ${message}. ${opts.failureSuffix ?? "Nothing was changed."}`,
+          message: `${failedPrefix(message)} ${opts.failureSuffix ?? "Nothing was changed."}`,
           signature,
         });
         return null;
@@ -133,7 +145,137 @@ export function useSendPermaTx() {
     [publicKey, connection, program, sendTransaction, push, update, refetchAll, refetchTouched]
   );
 
-  return { send, refetchAll };
+  /**
+   * Several dependent transactions behind one wallet approval (the Pyth post).
+   * They are signed together, then sent and confirmed strictly in order. Wallets
+   * without `signAllTransactions` fall back to one prompt per transaction.
+   */
+  const sendAll = useCallback(
+    async (
+      batches: { ixs: TransactionInstruction[]; signers: Signer[] }[],
+      opts: { successMessage: string }
+    ): Promise<boolean> => {
+      if (!publicKey) throw new Error("Connect a wallet to continue.");
+      if (!signAllTransactions) {
+        for (const b of batches) {
+          if (!(await send(b.ixs, { successMessage: opts.successMessage, extraSigners: b.signers }))) return false;
+        }
+        return true;
+      }
+
+      const toastId = push({ variant: "pending", message: "Confirm in your wallet" });
+      let signature: string | undefined;
+      try {
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        const txs = batches.map((b) => {
+          const tx = new Transaction().add(...b.ixs);
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = publicKey;
+          if (b.signers.length) tx.partialSign(...b.signers);
+          return tx;
+        });
+        const signed = await signAllTransactions(txs);
+        for (const tx of signed) {
+          signature = await connection.sendRawTransaction(tx.serialize());
+          const res = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+          if (res.value.err) throw Object.assign(new Error(JSON.stringify(res.value.err)), { signature });
+        }
+        update(toastId, { variant: "success", message: opts.successMessage, signature });
+        return true;
+      } catch (e) {
+        console.error("[useSendPermaTx]", e);
+        const { message } = parseAnchorError(e);
+        update(toastId, {
+          variant: "error",
+          message: `${failedPrefix(message)} Nothing was changed.`,
+          signature: (e as { signature?: string })?.signature ?? signature,
+        });
+        return false;
+      }
+    },
+    [publicKey, connection, signAllTransactions, send, push, update]
+  );
+
+  /**
+   * The Open flow: every step signed behind ONE wallet approval, then sent
+   * and confirmed strictly in order (`lib/txSequence.ts` decides what still
+   * goes out after a failure). The toast walks "Step N of M". Wallets
+   * without `signAllTransactions` get one prompt per step instead.
+   *
+   * Never throws. The returned result tells the caller whether to retry.
+   */
+  const sendSequence = useCallback(
+    async (
+      steps: SequenceStep<{ ixs: TransactionInstruction[]; signers: Signer[] }>[],
+      opts: { successMessage: string; failureMessage: string; onProgress?: (text: string | null) => void }
+    ): Promise<SequenceResult> => {
+      if (!publicKey) throw new Error("Connect a wallet to continue.");
+      const n = steps.length;
+      const toastId = push({
+        variant: "pending",
+        message: n > 1 ? `Approve ${n} transactions in your wallet` : "Confirm in your wallet",
+      });
+      opts.onProgress?.(n > 1 ? `Approve ${n} transactions in your wallet` : "Confirm in your wallet");
+      let result: SequenceResult;
+      try {
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        const build = (step: (typeof steps)[number], hash: string) => {
+          const tx = new Transaction().add(...step.tx.ixs);
+          tx.recentBlockhash = hash;
+          tx.feePayer = publicKey;
+          if (step.tx.signers.length) tx.partialSign(...step.tx.signers);
+          return tx;
+        };
+        let sendOne: (i: number) => Promise<string>;
+        if (signAllTransactions) {
+          const signed = await signAllTransactions(steps.map((s) => build(s, blockhash)));
+          sendOne = async (i) => {
+            // Preflight simulation on send returns program logs with any error.
+            const signature = await connection.sendRawTransaction(signed[i]!.serialize());
+            const res = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+            if (res.value.err) throw Object.assign(new Error(JSON.stringify(res.value.err)), { signature });
+            return signature;
+          };
+        } else {
+          sendOne = async (i) => {
+            const step = steps[i]!;
+            const latest = await connection.getLatestBlockhash();
+            const tx = build(step, latest.blockhash);
+            const signature = await sendTransaction(tx, connection, { signers: step.tx.signers });
+            await connection.confirmTransaction({ signature, ...latest }, "confirmed");
+            return signature;
+          };
+        }
+        result = await runSequence(
+          steps.map((s, i) => ({ ...s, tx: i })),
+          sendOne,
+          (i, total, label) => {
+            const text = stepLabel(i, total, label);
+            update(toastId, { message: text });
+            opts.onProgress?.(text);
+          }
+        );
+      } catch (e) {
+        // Rejected in the wallet, or no blockhash: nothing was sent.
+        result = { ok: false, signatures: steps.map(() => null), failedAt: 0, error: e, cleanupFailed: false };
+      }
+
+      // The last signature the user asked for (the mint), not the rent reclaim.
+      const main = steps.map((s, i) => (s.always ? null : result.signatures[i])).filter(Boolean).pop() ?? undefined;
+      if (!result.ok) console.error("[useSendPermaTx]", result.error);
+      update(toastId, {
+        ...sequenceToast(result, { ...opts, errorText: result.ok ? "" : parseAnchorError(result.error).message }),
+        signature: (result.error as { signature?: string } | null)?.signature ?? main,
+      });
+      const events = main ? await fetchTxEvents(connection, program, main) : [];
+      if (result.ok && events.length > 0) update(toastId, { detail: describeEvents(events) });
+      await Promise.all([refetchAll(), refetchTouched(events)]).catch((e) => console.error("[useSendPermaTx]", e));
+      return result;
+    },
+    [publicKey, connection, program, signAllTransactions, sendTransaction, push, update, refetchAll, refetchTouched]
+  );
+
+  return { send, sendAll, sendSequence, refetchAll };
 }
 
 /** Fresh (never store-cached) open-longs fetch — the only safe source for `remainingAccounts`. */

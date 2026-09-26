@@ -1,5 +1,7 @@
 # PERMA — Claude Code Prompt: P3 Oracle + Price-Aware Risk (ADR-0004)
 
+> **Status (2026-09-25): executed.** P3 shipped on localnet (2026-09-23) and on Solana-devnet (2026-09-25). Report: `docs/audits/IMPL-P3-ORACLE-RISK-REPORT.md`. Kept for history; do not re-run.
+
 **How to use:** New Claude Code chat in the **P2-shipped** repo root (`Perma/`, prefer Mac `/Users/maxcell/perma/Perma`). Paste `PROMPT` → `END PROMPT`, then the one-liner.
 
 **Why this session exists:**  

@@ -3,6 +3,8 @@ import { fetchHermesSolUsd, hermesBaseUrls } from "../../../../lib/pythUpdate";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 /**
  * Server-side Hermes fetch so `PYTH_API_KEY` stays out of the browser bundle.

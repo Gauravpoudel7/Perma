@@ -23,6 +23,7 @@ import { useWalletGuard } from "../../hooks/useWalletGuard";
 import { useChainStore } from "../../store/useChainStore";
 import { buildDepositCollateralIx } from "../../lib/perma";
 import { parseToBaseUnits } from "../../lib/format";
+import { cleanAmountInput } from "../../lib/ticketSize";
 
 const DECIMALS_A = 9;
 const DECIMALS_B = 6;
@@ -143,7 +144,7 @@ export function DepositForm() {
           id="deposit-sol"
           placeholder="0.00 SOL"
           value={amountSol}
-          onChange={(e) => setAmountSol(e.target.value)}
+          onChange={(e) => setAmountSol(cleanAmountInput(e.target.value, "sol"))}
         />
       </div>
       <div>
@@ -154,7 +155,7 @@ export function DepositForm() {
           id="deposit-usdc"
           placeholder="0.00 USDC"
           value={amountUsdc}
-          onChange={(e) => setAmountUsdc(e.target.value)}
+          onChange={(e) => setAmountUsdc(cleanAmountInput(e.target.value, "usdc"))}
         />
       </div>
       <div className="flex flex-col gap-2">

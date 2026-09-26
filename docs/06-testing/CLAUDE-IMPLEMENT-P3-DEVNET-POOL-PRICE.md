@@ -1,5 +1,7 @@
 # PERMA — Claude Code Prompt: P3-DEVNET-POOL-PRICE (Option A rebalance)
 
+> **Status (2026-09-25): executed and closed.** Option A worked: the pool `2WUg…` was swapped to Pyth SOL/USD (~$117), the devnet program was upgraded to P3 (ELF 604,992 B, slot 502908043), and `yarn smoke-devnet-p3 --smoke` is green. The "pre-P3" and "do not upgrade" lines below are now history. To keep the pool in band, use the re-tighten steps in `docs/audits/P3-DEVNET-POOL-PRICE.md` and `docs/06-testing/RELEASE-GATE.md` §5.1. Do not re-run this prompt.
+
 **How to use:** New Claude Code chat in the repo root (`/Users/maxcell/perma/Perma`). Paste everything between `PROMPT` and `END PROMPT`, then the one-liner at the bottom.
 
 **Plugins / wrap:**

@@ -7,7 +7,8 @@ import { TickArrayRentNotice } from "./TickArrayRentNotice";
 import { useTradeFormStore } from "../../store/useTradeFormStore";
 import { useChainStore } from "../../store/useChainStore";
 import { checkTickArraysExist, findSampleTickArrayLen, FALLBACK_TICK_ARRAY_LEN, type TickArrayStatus } from "../../lib/tickArray";
-import { tickToPrice } from "../../lib/whirlpool";
+import { sqrtPriceX64ToPrice, tickToPrice } from "../../lib/whirlpool";
+import { centeredRange, isFarFromSpot } from "../../lib/rangeCenter";
 import { WHIRLPOOL } from "../../lib/constants";
 
 const DECIMALS_A = 9;
@@ -82,6 +83,23 @@ export function RangeInput({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, market, tickLower, tickUpper, tickSpacing]);
 
+  // The untouched default is the localnet demo range. Where spot is far from
+  // it (Solana-devnet), open the ticket around spot instead - once: any range
+  // the user picks, including from inventory, is never moved for them.
+  useEffect(() => {
+    if (!spot || rangeSource !== "default") return;
+    if (!isFarFromSpot(tickLower, tickUpper, spot.tickCurrentIndex)) return;
+    const [lo, hi] = centeredRange(spot.tickCurrentIndex, tickSpacing);
+    setRange(clampTick(lo), clampTick(hi), "preset");
+  }, [spot, rangeSource, tickLower, tickUpper, tickSpacing, setRange]);
+
+  const far = spot !== null && isFarFromSpot(tickLower, tickUpper, spot.tickCurrentIndex);
+  function recenter() {
+    if (!spot) return;
+    const [lo, hi] = centeredRange(spot.tickCurrentIndex, tickSpacing);
+    setRange(clampTick(lo), clampTick(hi), "preset");
+  }
+
   const needsRent = status && (!status.lowerExists || !status.upperExists);
 
   const center = spot
@@ -136,6 +154,24 @@ export function RangeInput({
         {tickToPrice(tickUpper, DECIMALS_A, DECIMALS_B).toFixed(2)} USDC/SOL (ticks {tickLower} to{" "}
         {tickUpper})
       </p>
+      {far && spot && (
+        <div role="status" className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3">
+          <p className="text-body-sm text-text-muted">
+            Spot is{" "}
+            <span className="text-mono-sm tabular-nums text-text-primary">
+              {sqrtPriceX64ToPrice(spot.sqrtPriceX64, DECIMALS_A, DECIMALS_B).toFixed(2)}
+            </span>{" "}
+            USDC/SOL, far outside this range.
+          </p>
+          <button
+            type="button"
+            onClick={recenter}
+            className="transition-brand focus-ring text-body-sm rounded-sm border border-border px-3 py-2 text-text-primary hover:border-text-primary"
+          >
+            Re-center on spot
+          </button>
+        </div>
+      )}
       {rangeSource === "inventory" && (
         <p className="text-body-sm mt-1 text-text-muted">Selected range from inventory.</p>
       )}

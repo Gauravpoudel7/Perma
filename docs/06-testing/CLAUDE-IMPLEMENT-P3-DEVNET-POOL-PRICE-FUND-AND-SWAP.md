@@ -1,5 +1,7 @@
 # PERMA — Claude Code Prompt: P3-DEVNET-POOL-PRICE Phase A (fund + swap)
 
+> **Status (2026-09-25): executed and closed.** The faucet was funded, the swaps brought the pool to Pyth (~$117), and the devnet program now runs P3. The "pre-P3" and "do not upgrade" lines below are now history. For later drift, use the re-tighten steps in `docs/audits/P3-DEVNET-POOL-PRICE.md`. Do not re-run this prompt.
+
 **How to use:** New Claude Code chat in `/Users/maxcell/perma/Perma`. Paste everything between `PROMPT` and `END PROMPT`, then the one-liner at the bottom.
 
 **Plugins / wrap:** Ponytail / caveman **OFF**. If indexer is on **8787**, use `headroom wrap claude --port 8788`. Never combine Headroom with a caveman proxy wrap.

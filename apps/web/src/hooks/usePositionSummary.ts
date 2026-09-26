@@ -5,6 +5,8 @@ import { useRangeState } from "./useRangeState";
 import { payableIfSettledNow, projectedIndex, shortAccruedPremium, shortPayableNow } from "../lib/solvency";
 import { positionActions, type PositionActions } from "../lib/positionActions";
 import { tickToPrice } from "../lib/whirlpool";
+import { positionAmounts } from "../lib/liquidityMath";
+import { formatPair } from "../lib/format";
 import { LEG_LONG, STATUS_PENDING_PREMIUM } from "../lib/constants";
 import type { PositionWithPubkey } from "../lib/accounts";
 
@@ -29,6 +31,12 @@ export interface PositionSummary {
   actions: PositionActions;
   pending: boolean;
   statusLabel: "Open" | "Pending Premium";
+  /**
+   * The size in tokens at spot, e.g. "0.4 SOL + 52.1 USDC" - the same
+   * conversion the Trade ticket uses. Null before spot loads, and for a
+   * Pending Premium short, whose Orca liquidity is already withdrawn.
+   */
+  sizeLabel: string | null;
 }
 
 /**
@@ -44,6 +52,7 @@ export function usePositionSummary(position: PositionWithPubkey): PositionSummar
   const market = useChainStore((s) => s.market);
   const premiumIndex = useChainStore((s) => s.premiumIndex);
   const rangeState = useRangeState(position.tickLower, position.tickUpper);
+  const spot = useChainStore((s) => s.spot);
 
   if (!market) return null;
 
@@ -96,16 +105,21 @@ export function usePositionSummary(position: PositionWithPubkey): PositionSummar
     shortPayable,
   });
 
+  const liquidity = BigInt(position.liquidity.toString());
+  const amounts =
+    spot && !pending ? positionAmounts(liquidity, spot.tickCurrentIndex, position.tickLower, position.tickUpper) : null;
+
   return {
     isLong,
     sideLabel: isLong ? "Long (buy against inventory)" : "Short (provide liquidity)",
     lowPrice: tickToPrice(position.tickLower, DECIMALS_A, DECIMALS_B),
     highPrice: tickToPrice(position.tickUpper, DECIMALS_A, DECIMALS_B),
-    liquidity: BigInt(position.liquidity.toString()),
+    liquidity,
     accrued,
     shortPayable,
     actions,
     pending,
     statusLabel: pending ? "Pending Premium" : "Open",
+    sizeLabel: amounts ? formatPair(amounts.amountA, amounts.amountB) : null,
   };
 }

@@ -45,7 +45,7 @@ export function RangeSlider({
           const next = Math.min(Number(e.target.value), upper - step);
           onChange(next, upper);
         }}
-        className="range-thumb focus-ring pointer-events-none absolute inset-0 h-1 w-full appearance-none bg-transparent"
+        className="range-thumb focus-ring pointer-events-none absolute inset-x-0 top-1/2 h-1 w-full -translate-y-1/2 appearance-none bg-transparent"
       />
       <input
         aria-label="Upper tick"
@@ -59,7 +59,7 @@ export function RangeSlider({
           const next = Math.max(Number(e.target.value), lower + step);
           onChange(lower, next);
         }}
-        className="range-thumb focus-ring pointer-events-none absolute inset-0 h-1 w-full appearance-none bg-transparent"
+        className="range-thumb focus-ring pointer-events-none absolute inset-x-0 top-1/2 h-1 w-full -translate-y-1/2 appearance-none bg-transparent"
       />
       <style jsx>{`
         .range-thumb::-webkit-slider-thumb {

@@ -16,7 +16,11 @@
 
 ## Protocol V1 P3 (oracle gate) — **PASSED on localnet** (2026-09-23)
 
-**122 passing / 0 failing** (114 + 8 in `tests/oracle-risk.ts`), forward twice and reversed on one fresh ledger; unit **75**; indexer **20/20**; web `yarn test` **75** + `check-copy` clean; reconcile and monitor clean. Report: [`IMPL-P3-ORACLE-RISK-REPORT.md`](../audits/IMPL-P3-ORACLE-RISK-REPORT.md). Devnet is blocked on P3-DEVNET-POOL-PRICE ([ADR-0004](../adr/ADR-0004-oracle-and-price-aware-risk.md)).
+**122 passing / 0 failing** (114 + 8 in `tests/oracle-risk.ts`), forward twice and reversed on one fresh ledger; unit **75**; indexer **20/20**; web `yarn test` **75** + `check-copy` clean; reconcile and monitor clean. Report: [`IMPL-P3-ORACLE-RISK-REPORT.md`](../audits/IMPL-P3-ORACLE-RISK-REPORT.md). Devnet was blocked on P3-DEVNET-POOL-PRICE ([ADR-0004](../adr/ADR-0004-oracle-and-price-aware-risk.md)) until 2026-09-25; see the next section.
+
+## Protocol V1 P3 on Solana-devnet — **PASSED** (2026-09-25)
+
+The devnet program runs P3 (ELF **604,992 B**, slot **502908043**). The allowlisted pool `2WUg…` was swapped back to Pyth SOL/USD (~$117) and is within the 200 bps band. `yarn smoke-devnet-p3 --smoke` is green: Hermes post, deposit, mint short, mint long, close the Pyth accounts, then settle, close long, close short. The web client asks for **one** wallet approval for the three Pyth transactions and refuses a Hermes update older than 30 s before it sends anything. Web `yarn test` **113**. Ticket: [`P3-DEVNET-POOL-PRICE.md`](../audits/P3-DEVNET-POOL-PRICE.md).
 
 **Checklist notes (Fair honesty):** S1–S5, A1–A3, Q1, Q3 met by the green suites above. Q2 anti-slop remains an ongoing UI bar. E1/E2: localnet product loop (deposit → short → long → portfolio) verified by hand; Fair has **no mark P&L** ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)) — UI shows positions, collateral, and premium, not CEX-style P&L%. Devnet full `E2E-DEMO-SCRIPT` remains optional ops polish, not a Fair reopen.
 
@@ -123,6 +127,8 @@ suite fails fast in its `before` hook.
 | `ACkArM…KZGy` | TickArray `-39424`, the narrow same-array case |
 | `EgxU92…EiZ4` | a devnet pool with **active reward emissions** — proves the factory's allowlist check fires before its rewards check (`tests/factory*.ts`) |
 | `3KBZiL…HvPt` | a real devnet pool that is **not** allowlisted (`tests/adapter.ts`) |
+
+> **Known regression since 2026-09-25 (open, needs a decision).** `--clone 2WUg…` copies the pool's *live* devnet state. The pool was moved to Pyth (~$117, tick ~−21449) by P3-DEVNET-POOL-PRICE, so on a **fresh** ledger the 18–22 demo range sits below spot and a short there takes devUSDC only. Measured on a fresh clone (2026-09-25): **117 passing / 5 failing**. The failures are the WSOL assertions in `tests/adapter-liquidity.ts` (add, partial remove, slippage cap) and `tests/position-short.ts` (mint locks WSOL, two concurrent shorts). The program is not at fault. A ledger cloned before 2026-09-25 still gives 122/0. Fix options: pin the pool and its two vaults as `--account` JSON snapshots at ~$20 (recommended: tests stop depending on devnet drift), or retarget the fixture range around the live spot and clone the matching TickArrays.
 
 TickArrays must be cloned too, or every liquidity call fails with `TickArrayNotInitialized`. The three above cover the demo range on the allowlisted pool — see [`01-clmm-adapter-orca.md`](../02-mvp-components/01-clmm-adapter-orca.md) §C.3a for the derivation.
 
@@ -275,7 +281,7 @@ with `--reset` to get the real comparison.
 
 ```bash
 # cwd: $REPO/apps/web
-yarn test               # vitest: 75 cases (as of P3), incl. 11 indexer-client refusal cases
+yarn test               # vitest: 113 cases (as of P3 devnet), incl. 11 indexer-client refusal cases
 yarn check-copy         # banned-phrase list, COPY-DECK.md §5
 yarn typecheck
 yarn test:e2e           # Playwright: 47 passing, 4 skipped (webkit screenshot set)
@@ -286,7 +292,7 @@ Ship-blocking checks, all verifiable from the commands above:
 | Check | How it is proven |
 |---|---|
 | `/liquidations` is always `[]` | `indexer/test/projections.test.ts`; the client rejects a non-empty array outright |
-| No liquidation distance anywhere in the UI | There is no such component; P4 is not started |
+| No liquidation distance anywhere in the UI | There is no such component; P4 is at Phase 0 (ADR-0005 Proposed), and the gauge waits for it to be Accepted |
 | `/premium/series` is empty, never interpolated | Every point carries `source: "event" \| "poll"`; an unknown source voids the whole series |
 | Inventory is never called depth | `indexer/src/routes.ts` and `IndexedCharts.tsx` both label it "Inventory by range" |
 | `fetchFreshOpenLongs` still runs before every mint-long and withdraw | Untouched by P2; `grep fetchFreshOpenLongs apps/web/src` |
@@ -301,13 +307,28 @@ solana program show <PROGRAM_ID> -u devnet
 
 Expected from `program show`: correct `Program Id`, an `Authority` you control, and a recent `Last Deployed In Slot`.
 
+### 5.1 P3 oracle gate on devnet
+
+Every mint on devnet needs the pool within 200 bps of Pyth SOL/USD. Check that before a demo; the pool is thin at spot and arbitrage pulls it off the band.
+
+```bash
+# cwd: $REPO/apps/web   (PYTH_API_KEY in .env.local, never committed)
+yarn smoke-devnet-p3            # read only: ELF is not pre-P3, pool within 200 bps of Pyth
+yarn smoke-devnet-p3 --smoke    # full short + long open/close from ANCHOR_WALLET
+# cwd: $REPO
+node scripts/rebalance-devnet-pool.mjs --measure    # if it says OUTSIDE: measure, dry run, then one capped swap
+```
+
+Expected: `band WITHIN 200 bps`, then `smoke short and long opened with a Pyth account, then closed without one.` If the pool is outside the band, follow the re-tighten steps in [`P3-DEVNET-POOL-PRICE.md`](../audits/P3-DEVNET-POOL-PRICE.md). Never widen the band and never point devnet at the mock Pyth receiver.
+
 Then initialize per [`RUNBOOK-DEVNET.md`](../07-ops-presentation/RUNBOOK-DEVNET.md):
 
 ```bash
 # cwd: $REPO
 # TODO: none of these scripts exist yet. The working equivalents are the before() hooks in
-#       tests/factory.ts (init + create_market) and tests/position-short.ts (mintShort); the
-#       demo range is 18-22 USDC/SOL (ticks -40176 / -38168), NOT 180-220.
+#       tests/factory.ts (init + create_market) and tests/position-short.ts (mintShort). The
+#       localnet fixtures use 18-22 USDC/SOL (ticks -40176 / -38168); the devnet pool now
+#       trades ~117 (tick ~-21449), so a devnet demo range must sit around that spot.
 # yarn scripts:init-market
 # yarn scripts:seed-shorts --amount 10000 --range 18-22
 node scripts/reconcile.mjs                             # inventory + escrow + conservation per range
