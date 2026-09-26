@@ -151,6 +151,22 @@ export function canMintLong(
 }
 
 
+/**
+ * The largest long `L` that `canMintLong` still allows: `requiredMargin(L)`
+ * must fit in `freeB − existingRequired`. Exact integer inverse, so the
+ * ticket's "Max" never offers a size the program refuses with InsolventMint.
+ */
+export function maxAffordableLiquidity(
+  market: MarketRiskFields,
+  freeB: bigint,
+  existingRequired: bigint
+): bigint {
+  const room = freeB - existingRequired - market.longMarginBufferUsdc;
+  const perUnit = market.longMarginHorizonSlots * market.premiumRate * market.premiumMultiplier;
+  if (room <= 0n || perUnit === 0n) return 0n;
+  return (room * PREMIUM_SCALE) / perUnit;
+}
+
 // --- Short-side entitlement (display only — mirrors premium::claimable_for /
 // premium::claim_short_amount in programs/perma/src/premium.rs) ------------
 

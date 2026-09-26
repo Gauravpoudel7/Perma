@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Keypair, type TransactionInstruction } from "@solana/web3.js";
+import { Keypair, type Signer, type TransactionInstruction } from "@solana/web3.js";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { useSendPermaTx, fetchFreshOpenLongs } from "./useSendPermaTx";
 import { usePermaProgram } from "./usePermaProgram";
@@ -9,6 +9,8 @@ import { useWalletGuard } from "./useWalletGuard";
 import { useOpenLongs } from "./useOpenLongs";
 import { useRequiredFreeUsdc } from "./useRequiredFreeUsdc";
 import { useRangeStateValue } from "./useRangeState";
+import { useTicketSize } from "./useTicketSize";
+import { vaultShortfall } from "../lib/ticketSize";
 import { useChainStore } from "../store/useChainStore";
 import { useTradeFormStore, type Side } from "../store/useTradeFormStore";
 import { buildMintPositionIx } from "../lib/perma";
@@ -17,9 +19,11 @@ import { marketAuthorityPda } from "../lib/pda";
 import { buildMissingTickArrayIxs, type TickArrayStatus } from "../lib/tickArray";
 import { slippageCappedTokenMax } from "../lib/liquidityMath";
 import { canMintLong, estPremiumPerHour, requiredMargin } from "../lib/solvency";
-import { tickToPrice } from "../lib/whirlpool";
+import { sqrtPriceX64ToPrice, tickToPrice } from "../lib/whirlpool";
 import { WHIRLPOOL, MAX_OPEN_LONGS } from "../lib/constants";
-import { resolveMintPriceUpdate } from "../lib/pythUpdate";
+import { mintPostsFreshPyth, planMintPriceUpdate, readPriceAge, shouldRepost } from "../lib/pythUpdate";
+import { openStepLabels, StalePriceError, type SequenceStep } from "../lib/txSequence";
+import { PERMA_ERROR_COPY } from "../lib/errors";
 import { useToastStore } from "../store/useToastStore";
 
 // Demo pool: WSOL (9 decimals) / devUSDC (6 decimals).
@@ -34,6 +38,11 @@ export interface OpenPositionSummary {
   lowPrice: number;
   highPrice: number;
   liquidity: bigint;
+  /** What `liquidity` uses at spot (base units, estimate). Short: locked from the vault. Long: the short liquidity it tracks. */
+  amountA: bigint;
+  amountB: bigint;
+  /** `amountA` valued at spot plus `amountB`, in USDC. Display only. */
+  usdEstimate: number | null;
   /** Short only: the slippage caps actually passed to `mint_position`. */
   tokenMaxA: bigint | null;
   tokenMaxB: bigint | null;
@@ -46,16 +55,16 @@ export interface OpenPositionSummary {
 }
 
 /**
- * The mint preflight + transaction build, lifted out of `OpenPositionButton`
- * so the CTA and the ReviewSheet share one guard chain and one `handleOpen`.
- * The guard order and the two instruction builders are unchanged from the
- * pre-U1 button; only the JSX moved.
+ * The mint preflight + transaction build, shared by the CTA and the
+ * ReviewSheet. `handleOpen` signs the whole flow (tick-array rent, Pyth
+ * post, mint, Pyth rent reclaim) behind one wallet approval, so the posted
+ * price is seconds old when the mint lands, not "however long the user took".
  */
 export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
   const program = usePermaProgram();
-  const { send, sendAll } = useSendPermaTx();
+  const { sendSequence } = useSendPermaTx();
   const { canTransact, reason } = useWalletGuard();
   const market = useChainStore((s) => s.market);
   const marketPubkey = useChainStore((s) => s.marketPubkey);
@@ -63,22 +72,24 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
   const spot = useChainStore((s) => s.spot);
   const openLongsDisplay = useOpenLongs();
   const requiredView = useRequiredFreeUsdc();
+  const size = useTicketSize();
 
   const side = useTradeFormStore((s) => s.side);
   const tickLower = useTradeFormStore((s) => s.tickLower);
   const tickUpper = useTradeFormStore((s) => s.tickUpper);
-  const sizeInput = useTradeFormStore((s) => s.sizeInput);
-  const setSizeInput = useTradeFormStore((s) => s.setSizeInput);
+  const setAmount = useTradeFormStore((s) => s.setAmount);
+  const amountToken = useTradeFormStore((s) => s.amountToken);
   const rangeState = useRangeStateValue(tickLower, tickUpper);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const push = useToastStore((s) => s.push);
 
-  let liquidity: bigint | null = null;
-  try {
-    liquidity = sizeInput ? BigInt(sizeInput) : null;
-  } catch {
-    liquidity = null;
-  }
+  const liquidity = size?.liquidity ?? null;
+  const tickCurrent = spot?.tickCurrentIndex ?? null;
+  const caps =
+    side === "short" && liquidity && tickCurrent !== null
+      ? slippageCappedTokenMax(liquidity, tickCurrent, tickLower, tickUpper)
+      : null;
 
   const available = rangeState
     ? BigInt(rangeState.totalShortLiquidity.toString()) - BigInt(rangeState.totalLongLiquidity.toString())
@@ -94,77 +105,51 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
     : null;
 
   let disabledReason: string | null = null;
+  /** True when the fix is a deposit, so the CTA can link to the Vault. */
+  let needsDeposit = false;
   if (!canTransact) disabledReason = reason;
-  else if (!liquidity || liquidity <= 0n) disabledReason = "Enter a position size.";
-  else if (side === "long" && available <= 0n) disabledReason = "No inventory in this range.";
-  else if (side === "long" && liquidity > available) disabledReason = "Exceeds available inventory.";
+  else if (!size) disabledReason = "Loading the pool price.";
+  else if (size.error) disabledReason = size.error;
+  else if (!liquidity || liquidity <= 0n) disabledReason = "Enter an amount.";
+  else if (side === "short" && caps && userCollateral) {
+    disabledReason = vaultShortfall(caps, {
+      a: BigInt(userCollateral.balanceA.toString()),
+      b: BigInt(userCollateral.balanceB.toString()),
+    });
+    needsDeposit = disabledReason !== null;
+  } else if (side === "long" && available <= 0n) disabledReason = "No inventory in this range.";
+  else if (side === "long" && liquidity > available) disabledReason = "Exceeds the short liquidity available in this range.";
   else if (side === "long" && openLongsDisplay.length >= MAX_OPEN_LONGS)
     disabledReason = "You've reached the maximum of 8 open longs.";
   else if (side === "long" && requiredView) {
     // `requiredView.required` is the same `requiredFreeUsdc(...)` figure the Vault gate uses.
     if (!canMintLong(requiredView.freeUsdc, requiredView.required, liquidity, requiredView.marketRiskFields)) {
       disabledReason = "Your free USDC can't cover this long's required margin.";
+      needsDeposit = true;
     }
   }
 
-  async function handleOpen() {
-    if (!publicKey || !market || !marketPubkey || !liquidity) return;
-    setBusy(true);
-    let closeIxs: TransactionInstruction[] = [];
-    let opened = false;
-    try {
-      const price = await resolveMintPriceUpdate({
-        connection,
-        payer: publicKey,
-        sendTx: (ixs, signers, successMessage) => send(ixs, { successMessage, extraSigners: signers }),
-        sendTxs: (txs, successMessage) => sendAll(txs, { successMessage }),
-      });
-      closeIxs = price.closeIxs;
-      if (!price.ok || !price.priceUpdate) {
-        if (!price.alreadyToasted && price.error) {
-          push({ variant: "error", message: price.error });
-        }
-        return;
-      }
+  async function buildSteps(
+    price: Extract<Awaited<ReturnType<typeof planMintPriceUpdate>>, { ok: true }>,
+    staleMessage: string
+  ): Promise<SequenceStep<{ ixs: TransactionInstruction[]; signers: Signer[] }>[]> {
+    if (!publicKey || !market || !marketPubkey || !liquidity || tickCurrent === null) return [];
+    const [marketAuthority] = marketAuthorityPda(marketPubkey);
+    const nonce = BigInt(Date.now());
 
-      const [marketAuthority] = marketAuthorityPda(marketPubkey);
-      const nonce = BigInt(Date.now());
+    const tickArrayIxs =
+      side === "short" && tickArrayStatus && (!tickArrayStatus.lowerExists || !tickArrayStatus.upperExists)
+        ? buildMissingTickArrayIxs(WHIRLPOOL, publicKey, tickArrayStatus, tickLower, tickUpper, market.tickSpacing)
+        : [];
 
-      if (side === "short") {
-        const positionMint = Keypair.generate();
-        const orcaAccounts = resolveMintShortOrcaAccounts(
-          market,
-          marketAuthority,
-          tickLower,
-          tickUpper,
-          positionMint.publicKey
-        );
-        const { tokenMaxA, tokenMaxB } = slippageCappedTokenMax(
-          liquidity,
-          spot?.tickCurrentIndex ?? tickLower,
-          tickLower,
-          tickUpper
-        );
-
-        const tickArrayIxs =
-          tickArrayStatus && (!tickArrayStatus.lowerExists || !tickArrayStatus.upperExists)
-            ? buildMissingTickArrayIxs(
-                WHIRLPOOL,
-                publicKey,
-                tickArrayStatus,
-                tickLower,
-                tickUpper,
-                market.tickSpacing
-              )
-            : [];
-        // A P3 short mint has 43 bytes of headroom. The tick-array rent, when
-        // it is due, goes in the transaction before the mint.
-        if (tickArrayIxs.length > 0) {
-          const rentSig = await send(tickArrayIxs, { successMessage: "Tick array created." });
-          if (!rentSig) return;
-        }
-
-        const mintIx = await buildMintPositionIx(program, {
+    let mint: { ixs: TransactionInstruction[]; signers: Signer[] };
+    if (side === "short") {
+      const positionMint = Keypair.generate();
+      const orcaAccounts = resolveMintShortOrcaAccounts(market, marketAuthority, tickLower, tickUpper, positionMint.publicKey);
+      const { tokenMaxA, tokenMaxB } = slippageCappedTokenMax(liquidity, tickCurrent, tickLower, tickUpper);
+      const ix = await buildMintPositionIx(
+        program,
+        {
           leg: "short",
           owner: publicKey,
           market: marketPubkey,
@@ -176,19 +161,15 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
           nonce,
           ...orcaAccounts,
           positionMint,
-        }, { priceUpdate: price.priceUpdate });
-
-        const shortSig = await send([mintIx], {
-          successMessage: "Position opened.",
-          extraSigners: [positionMint],
-        });
-        if (shortSig) {
-          opened = true;
-          setSizeInput("");
-        }
-      } else {
-        const freshOpenLongs = await fetchFreshOpenLongs(program, connection, marketPubkey, publicKey);
-        const mintIx = await buildMintPositionIx(program, {
+        },
+        { priceUpdate: price.priceUpdate }
+      );
+      mint = { ixs: [ix], signers: [positionMint] };
+    } else {
+      const freshOpenLongs = await fetchFreshOpenLongs(program, connection, marketPubkey, publicKey);
+      const ix = await buildMintPositionIx(
+        program,
+        {
           leg: "long",
           owner: publicKey,
           market: marketPubkey,
@@ -198,12 +179,67 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
           nonce,
           whirlpool: WHIRLPOOL,
           existingOpenLongs: freshOpenLongs,
-        }, { priceUpdate: price.priceUpdate });
-        const longSig = await send([mintIx], { successMessage: "Position opened." });
-        if (longSig) {
-          opened = true;
-          setSizeInput("");
+        },
+        { priceUpdate: price.priceUpdate }
+      );
+      mint = { ixs: [ix], signers: [] };
+    }
+
+    const postTxs = price.post?.txs ?? [];
+    const labels = openStepLabels({ rent: tickArrayIxs.length > 0, pythTxs: postTxs.length, side });
+    const txs = [
+      ...(tickArrayIxs.length > 0 ? [{ ixs: tickArrayIxs, signers: [] as Signer[] }] : []),
+      ...postTxs,
+      mint,
+    ];
+    const steps: SequenceStep<{ ixs: TransactionInstruction[]; signers: Signer[] }>[] = txs.map((tx, i) => ({
+      label: labels[i]!,
+      tx,
+    }));
+    // The posted price is re-read right before the mint goes out: a mint that
+    // would land on a price the program calls stale is never sent.
+    if (mintPostsFreshPyth()) {
+      steps[steps.length - 1]!.check = async () => {
+        const view = await readPriceAge(connection, price.priceUpdate);
+        if (!view || shouldRepost(view.publishTime, Math.floor(Date.now() / 1000))) {
+          throw new StalePriceError(staleMessage);
         }
+      };
+    }
+    if (price.post) {
+      steps.push({ label: labels[labels.length - 1]!, tx: { ixs: price.post.closeIxs, signers: [] }, always: true });
+    }
+    return steps;
+  }
+
+  async function handleOpen() {
+    if (!publicKey || !market || !marketPubkey || !liquidity) return;
+    setBusy(true);
+    try {
+      // One re-post: if the price went stale while the user was approving,
+      // post a fresh one and ask once more. A second stale price stops here.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const price = await planMintPriceUpdate({ connection, payer: publicKey });
+        if (!price.ok) {
+          push({ variant: "error", message: price.error });
+          return;
+        }
+        const staleMessage =
+          attempt === 0
+            ? "The price got too old while you were approving. Approve once more to post a fresh one."
+            : PERMA_ERROR_COPY.OracleStale!;
+        const steps = await buildSteps(price, staleMessage);
+        if (steps.length === 0) return;
+        const result = await sendSequence(steps, {
+          successMessage: "Position opened.",
+          failureMessage: "No position was opened.",
+          onProgress: setProgress,
+        });
+        if (result.ok) {
+          setAmount("", amountToken);
+          return;
+        }
+        if (!(result.error instanceof StalePriceError)) return;
       }
     } catch (err) {
       console.error("[useOpenPosition]", err);
@@ -212,25 +248,15 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
         message: err instanceof Error ? err.message : "The mint was not sent.",
       });
     } finally {
-      if (closeIxs.length > 0) {
-        await send(closeIxs, {
-          successMessage: "Pyth update account closed.",
-          failureSuffix: opened
-            ? "The position is open. Pyth rent was not reclaimed."
-            : "Pyth rent was not reclaimed.",
-        });
-      }
       setBusy(false);
+      setProgress(null);
     }
   }
 
   // Review figures: computed with the exact same inputs `handleOpen` will use.
   let summary: OpenPositionSummary | null = null;
-  if (liquidity && liquidity > 0n) {
-    const caps =
-      side === "short"
-        ? slippageCappedTokenMax(liquidity, spot?.tickCurrentIndex ?? tickLower, tickLower, tickUpper)
-        : null;
+  if (liquidity && liquidity > 0n && size && spot) {
+    const price = sqrtPriceX64ToPrice(spot.sqrtPriceX64, DECIMALS_A, DECIMALS_B);
     summary = {
       side,
       tickLower,
@@ -238,6 +264,9 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
       lowPrice: tickToPrice(tickLower, DECIMALS_A, DECIMALS_B),
       highPrice: tickToPrice(tickUpper, DECIMALS_A, DECIMALS_B),
       liquidity,
+      amountA: size.amountA,
+      amountB: size.amountB,
+      usdEstimate: (Number(size.amountA) / 1e9) * price + Number(size.amountB) / 1e6,
       tokenMaxA: caps?.tokenMaxA ?? null,
       tokenMaxB: caps?.tokenMaxB ?? null,
       requiredMarginUsdc: side === "long" && marketRiskFields ? requiredMargin(marketRiskFields, liquidity) : null,
@@ -247,5 +276,6 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
     };
   }
 
-  return { side, disabledReason, busy, summary, handleOpen };
+  return { side, disabledReason, needsDeposit, busy, progress, summary, handleOpen };
 }
+

@@ -2,40 +2,56 @@
 
 import { useChainStore } from "../../store/useChainStore";
 import { useTradeFormStore } from "../../store/useTradeFormStore";
+import { useTicketSize } from "../../hooks/useTicketSize";
+import { useRequiredFreeUsdc } from "../../hooks/useRequiredFreeUsdc";
 import { formatBaseUnits } from "../../lib/format";
-import { estPremiumPerHour } from "../../lib/solvency";
+import { estPremiumPerHour, requiredMargin } from "../../lib/solvency";
 
 const DECIMALS_B = 6;
 
-/** COPY-DECK §4.1: "Est. premium per hour, at the current rate." Long side only — a short earns, doesn't pay. */
+/**
+ * COPY-DECK §4.1: "Est. premium per hour, at the current rate." Long side
+ * only — a short earns, doesn't pay. It is the headline of a long ticket:
+ * premium is the money a long actually pays, and the margin is what it must
+ * keep free to open.
+ */
 export function PremiumPreview() {
   const market = useChainStore((s) => s.market);
   const side = useTradeFormStore((s) => s.side);
-  const sizeInput = useTradeFormStore((s) => s.sizeInput);
+  const liquidity = useTicketSize()?.liquidity ?? null;
+  const requiredView = useRequiredFreeUsdc();
 
-  if (side !== "long" || !market || !sizeInput) return null;
+  if (side !== "long" || !market || !liquidity) return null;
 
-  let liquidity: bigint;
-  try {
-    liquidity = BigInt(sizeInput);
-  } catch {
-    return null;
-  }
-
-  const perHour = estPremiumPerHour(
-    {
-      premiumRate: BigInt(market.premiumRate.toString()),
-      premiumMultiplier: BigInt(market.premiumMultiplier.toString()),
-    },
-    liquidity
-  );
+  const risk = {
+    longMarginHorizonSlots: BigInt(market.longMarginHorizonSlots.toString()),
+    premiumRate: BigInt(market.premiumRate.toString()),
+    premiumMultiplier: BigInt(market.premiumMultiplier.toString()),
+    longMarginBufferUsdc: BigInt(market.longMarginBufferUsdc.toString()),
+  };
+  const perHour = estPremiumPerHour(risk, liquidity);
 
   return (
-    <p className="text-body-sm text-text-muted">
-      Est. premium per hour, at the current rate:{" "}
-      <span className="text-mono-sm tabular-nums text-text-primary">
-        {formatBaseUnits(perHour, DECIMALS_B, 6)} USDC
-      </span>
-    </p>
+    <div className="rounded-md border border-border p-3">
+      <p className="text-body-sm text-text-muted">Est. premium per hour, at the current rate</p>
+      <p className="text-h4 tabular-nums text-text-primary">{formatBaseUnits(perHour, DECIMALS_B, 6)} USDC</p>
+      <p className="text-body-sm mt-1 text-text-muted">
+        Required margin{" "}
+        <span className="text-mono-sm tabular-nums text-text-primary">
+          {formatBaseUnits(requiredMargin(risk, liquidity), DECIMALS_B, 2)} USDC
+        </span>
+        {requiredView && (
+          <>
+            {" "}
+            of your{" "}
+            <span className="text-mono-sm tabular-nums text-text-primary">
+              {formatBaseUnits(requiredView.freeUsdc, DECIMALS_B, 2)} USDC
+            </span>{" "}
+            free
+          </>
+        )}
+        .
+      </p>
+    </div>
   );
 }

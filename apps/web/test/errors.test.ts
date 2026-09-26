@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PERMA_ERROR_COPY, parseAnchorError } from "../src/lib/errors";
+import { nameForCustomCode, PERMA_ERROR_COPY, parseAnchorError } from "../src/lib/errors";
+import { StalePriceError } from "../src/lib/txSequence";
 
 // Every PermaError variant from programs/perma/src/errors.rs — if one is
 // added on-chain without a corresponding entry here, this test catches it.
@@ -110,5 +111,41 @@ describe("localnet funding failures", () => {
       ])
     );
     expect(parsed.name).toBe("WalletInsufficientFunds");
+  });
+});
+
+describe("OracleStale behind Phantom's generic error", () => {
+  it("maps 6038 / 0x1796 in any printed shape to the approval-time copy", () => {
+    for (const text of [
+      "custom program error: 0x1796",
+      'Transaction simulation failed: {"InstructionError":[0,{"Custom":6038}]}',
+      "failed: Custom(6038)",
+      "Error Number: 6038. Error Message: Oracle price is too old.",
+    ]) {
+      const e = Object.assign(new Error("Unexpected error"), { error: new Error(text) });
+      expect(parseAnchorError(e)).toEqual({ name: "OracleStale", message: PERMA_ERROR_COPY.OracleStale });
+    }
+    expect(PERMA_ERROR_COPY.OracleStale).toMatch(/too old while you were approving/);
+  });
+
+  it("maps every PermaError code from the IDL, and ignores codes that are not PERMA's", () => {
+    expect(nameForCustomCode("custom program error: 0x1788")).toBe("UnexpectedRemainingAccounts"); // 6024
+    expect(nameForCustomCode('{"Custom":6040}')).toBe("OracleDeviationTooHigh");
+    expect(nameForCustomCode("custom program error: 0x1")).toBeNull(); // SPL Token, not PERMA
+  });
+
+  it("names the error from simulation logs when the wallet only says Unexpected error", () => {
+    const logs = [
+      "Program 4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt invoke [1]",
+      "Program log: AnchorError occurred. Error Code: OracleStale. Error Number: 6038. Error Message: Oracle price is too old.",
+      "Program 4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt failed: custom program error: 0x1796",
+    ];
+    const e = Object.assign(new Error("Simulation failed"), { logs });
+    expect(parseAnchorError(e).name).toBe("OracleStale");
+  });
+
+  it("passes the re-post prompt through as written", () => {
+    const msg = "The price got too old while you were approving. Approve once more to post a fresh one.";
+    expect(parseAnchorError(new StalePriceError(msg)).message).toBe(msg);
   });
 });

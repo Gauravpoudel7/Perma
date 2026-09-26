@@ -7,6 +7,7 @@ import {
   PERMA_PROGRAM_ID,
   defaultPriceUpdateAddress,
   mintExpectsPriceUpdate,
+  PRICE_UPDATE,
 } from "../src/lib/constants";
 import {
   DEVNET_SPONSORED_SOL_USD,
@@ -21,6 +22,9 @@ import {
   fetchHermesSolUsd,
   messagePublishTime,
   resolveMintPriceUpdate,
+  planMintPriceUpdate,
+  shouldRepost,
+  REPOST_AGE_SECS,
   mintPostsFreshPyth,
   parseAccumulatorUpdate,
   programDataAddress,
@@ -283,5 +287,84 @@ describe("resolveMintPriceUpdate on Solana-devnet", () => {
     expect(sendTxs.mock.calls[0]?.[0]).toHaveLength(3);
     expect(sendTx).not.toHaveBeenCalled();
     expect(messagePublishTime(priceMessage(NOW))).toBe(NOW);
+  });
+});
+
+describe("planMintPriceUpdate: fresh vs stale", () => {
+  const NOW = 1_790_163_650;
+  const vaa = Buffer.alloc(80);
+  vaa[0] = 1;
+  vaa.writeUInt32BE(3, 1);
+
+  /** A receiver-owned Full SOL/USD PriceUpdateV2 published at `publishTime`. */
+  function sponsored(publishTime: number) {
+    const d = Buffer.alloc(133);
+    Buffer.from([34, 241, 35, 99, 157, 126, 244, 205]).copy(d, 0);
+    d[40] = 1;
+    FEED.copy(d, 41);
+    d.writeBigInt64LE(11_600_000_000n, 73);
+    d.writeInt32LE(-8, 89);
+    d.writeBigInt64LE(BigInt(publishTime), 93);
+    return { data: d, owner: PYTH_RECEIVER_PROGRAM_ID };
+  }
+  function connectionWith(sponsoredPublishTime: number | null) {
+    return {
+      getAccountInfo: async (pk: PublicKey) => {
+        if (pk.equals(PERMA_PROGRAM_ID)) {
+          const d = Buffer.alloc(36);
+          d.writeUInt32LE(2, 0);
+          ADMIN.toBuffer().copy(d, 4);
+          return { data: d, owner: PublicKey.default };
+        }
+        if (pk.equals(ADMIN)) {
+          const d = Buffer.alloc(45 + 604_992);
+          d.writeUInt32LE(3, 0);
+          d[12] = 1;
+          return { data: d, owner: PublicKey.default };
+        }
+        if (pk.equals(PRICE_UPDATE) && sponsoredPublishTime !== null) return sponsored(sponsoredPublishTime);
+        return null;
+      },
+      getMinimumBalanceForRentExemption: async () => 1_000_000,
+    } as never;
+  }
+  const plan = (sponsoredPublishTime: number | null) =>
+    planMintPriceUpdate({
+      connection: connectionWith(sponsoredPublishTime),
+      payer: ADMIN,
+      cluster: "devnet",
+      flag: "1",
+      nowSecs: NOW,
+      fetchUpdate: async () => accumulator(vaa, priceMessage(NOW - 1), [Buffer.alloc(20, 9)]),
+    });
+
+  it("uses a sponsored price with signing time left, and posts nothing", async () => {
+    const r = await plan(NOW - 10);
+    expect(r).toMatchObject({ ok: true, post: null });
+    if (r.ok) expect(r.priceUpdate.equals(PRICE_UPDATE)).toBe(true);
+  });
+
+  it("plans a post when the sponsored price is too old to sign against (45 s), though the chain allows 60", async () => {
+    const r = await plan(NOW - 50);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.post).not.toBeNull();
+      expect(r.priceUpdate.equals(PRICE_UPDATE)).toBe(false);
+      expect(r.post!.closeIxs).toHaveLength(2);
+    }
+  });
+
+  it("plans a post when there is no sponsored account at all", async () => {
+    const r = await plan(null);
+    expect(r.ok && r.post !== null).toBe(true);
+  });
+});
+
+describe("shouldRepost", () => {
+  it("re-posts from 45 s of age, under the program's 60 s limit", () => {
+    expect(REPOST_AGE_SECS).toBe(45);
+    expect(shouldRepost(1000, 1044)).toBe(false);
+    expect(shouldRepost(1000, 1045)).toBe(true);
+    expect(shouldRepost(1000, 1060)).toBe(true);
   });
 });

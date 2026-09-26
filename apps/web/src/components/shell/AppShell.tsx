@@ -35,7 +35,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <ClusterGuard />
       <div className="flex flex-1">
         <Sidenav />
-        <div className="flex flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
           <TopBar />
           {/* Bottom padding clears the fixed chrome: tab bar + banner on phones, banner alone from md. */}
           <main id="main" tabIndex={-1} className="flex-1 overflow-y-auto p-4 pb-[calc(var(--shell-banner-h)+var(--shell-tabbar-h)+1rem)] md:p-6 md:pb-[calc(var(--shell-banner-h)+1.5rem)]">

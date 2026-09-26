@@ -61,7 +61,11 @@ function Body({ position, onClose }: { position: PositionWithPubkey; onClose: ()
           value={`${s.lowPrice.toFixed(2)}–${s.highPrice.toFixed(2)} USDC/SOL`}
           hint={`ticks ${position.tickLower} to ${position.tickUpper}`}
         />
-        <Row label="Position size" value={`${s.liquidity.toString()} liquidity units`} />
+        <Row
+          label="Position size"
+          value={s.sizeLabel ? `≈ ${s.sizeLabel} at spot` : `${s.liquidity.toString()} liquidity units`}
+          hint={s.sizeLabel ? `${s.liquidity.toString()} liquidity units` : undefined}
+        />
         <Row label="Status" value={<Badge tone={s.pending ? "warning" : "neutral"}>{s.statusLabel}</Badge>} mono={false} />
         <Row
           label="Accrued premium"

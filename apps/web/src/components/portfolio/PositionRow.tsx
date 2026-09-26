@@ -31,7 +31,7 @@ export const PositionRow = forwardRef<
         {s.lowPrice.toFixed(2)}–{s.highPrice.toFixed(2)} USDC/SOL
       </Cell>
       <Cell label="Size" mono>
-        {s.liquidity.toString()}
+        {s.sizeLabel ?? `${s.liquidity.toString()} liquidity`}
       </Cell>
       <Cell label="Accrued Premium" mono>
         Est. {formatBaseUnits(s.accrued, DECIMALS_B, 6)} USDC

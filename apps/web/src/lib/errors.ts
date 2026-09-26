@@ -1,4 +1,5 @@
 import { AnchorError } from "@coral-xyz/anchor";
+import idl from "../idl/perma.json";
 
 /**
  * `PermaError` (programs/perma/src/errors.rs) → user-facing copy. Maps by
@@ -49,7 +50,9 @@ export const PERMA_ERROR_COPY: Record<string, string> = {
   TooManyOpenLongs: "You've reached the maximum of 8 open longs.",
   InvalidRiskParams: "Those risk parameters would overflow the margin bound.",
   OracleUnavailable: "The reference price is unavailable, so new positions can't open. Closing still works.",
-  OracleStale: "The reference price is out of date, so new positions can't open. Try again shortly.",
+  // The app posts a fresh price before every mint, so on this path "stale"
+  // means the approvals took longer than the program's 60 s limit.
+  OracleStale: "The price got too old while you were approving. Try again.",
   OracleConfidenceTooWide:
     "The reference price is too uncertain right now, so new positions can't open. Try again shortly.",
   OracleDeviationTooHigh:
@@ -131,23 +134,11 @@ export function parseAnchorError(e: unknown): ParsedPermaError {
     }
   }
 
-  // Phantom often surfaces only "Unexpected error" and leaves the Anchor name
-  // out of the message. The pre-P3 Solana-devnet mismatch shows up as custom
-  // program error 6024 (0x1788) / UnexpectedRemainingAccounts in the logs.
-  const blobForCode = `${raw}\n${logBlob}`;
-  const remainingAccountsCopy = PERMA_ERROR_COPY.UnexpectedRemainingAccounts;
-  if (
-    remainingAccountsCopy &&
-    (/Error Number:\s*6024\b/.test(blobForCode) ||
-      /custom program error:\s*(?:0x1788|6024)\b/i.test(blobForCode) ||
-      /"Custom"\s*:\s*6024\b/.test(blobForCode) ||
-      /Custom\(6024\)/.test(blobForCode))
-  ) {
-    return {
-      name: "UnexpectedRemainingAccounts",
-      message: remainingAccountsCopy,
-    };
-  }
+  // Phantom often surfaces only "Unexpected error" plus a bare custom code
+  // (e.g. OracleStale is 6038 / 0x1796) with no Anchor name in the text.
+  const byCode = nameForCustomCode(`${raw}\n${logBlob}`);
+  const byCodeCopy = byCode ? PERMA_ERROR_COPY[byCode] : undefined;
+  if (byCode && byCodeCopy) return { name: byCode, message: byCodeCopy };
 
   if (/user rejected/i.test(raw)) {
     return { name: "UserRejected", message: "Transaction cancelled." };
@@ -184,4 +175,33 @@ export function parseAnchorError(e: unknown): ParsedPermaError {
     name: "UnknownError",
     message: hint && !/^unexpected error$/i.test(hint) ? hint : "Unexpected error",
   };
+}
+
+/** `PermaError` code -> name, from the IDL, so a new variant never needs a hand-written regex. */
+const ERROR_NAME_BY_CODE = new Map<number, string>(
+  (idl as { errors?: { code: number; name: string }[] }).errors?.map((e) => [e.code, e.name]) ?? []
+);
+
+/**
+ * The PermaError name behind a bare custom program error code, in any of the
+ * shapes wallets and RPCs print it. A CPI failure inside PERMA (e.g. Orca's
+ * own 60xx) can carry a code from another program; with logs present,
+ * `AnchorError.parse` above has already resolved PERMA's own errors by name.
+ */
+export function nameForCustomCode(text: string): string | null {
+  const patterns = [
+    /Error Number:\s*(\d+)/,
+    /custom program error:\s*0x([0-9a-f]+)\b/i,
+    /custom program error:\s*(\d+)\b/i,
+    /"Custom"\s*:\s*(\d+)/,
+    /Custom\((\d+)\)/,
+  ];
+  for (const [i, re] of patterns.entries()) {
+    const m = re.exec(text);
+    if (!m?.[1]) continue;
+    const code = i === 1 ? parseInt(m[1], 16) : Number(m[1]);
+    const name = ERROR_NAME_BY_CODE.get(code);
+    if (name) return name;
+  }
+  return null;
 }

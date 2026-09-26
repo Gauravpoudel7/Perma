@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import { Button } from "../primitives/Button";
 import { SlideOver, SlideOverRow as Row } from "../primitives/SlideOver";
-import { formatBaseUnits } from "../../lib/format";
+import { formatBaseUnits, formatPair } from "../../lib/format";
 import type { OpenPositionSummary } from "../../hooks/useOpenPosition";
 
 const DECIMALS_A = 9;
@@ -20,9 +20,12 @@ export function ReviewSheet({
   summary,
   onCancel,
   onConfirm,
+  changed = false,
 }: {
   open: boolean;
   summary: OpenPositionSummary | null;
+  /** Spot moved since the sheet opened and the amounts below were recomputed. */
+  changed?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -30,13 +33,17 @@ export function ReviewSheet({
   if (!summary) return null;
 
   const isLong = summary.side === "long";
-  const confirmLabel = isLong ? "Confirm Open Long" : "Confirm Open Short";
+  const confirmLabel = changed
+    ? "Confirm updated amounts"
+    : isLong
+    ? "Confirm Open Long"
+    : "Confirm Open Short";
 
   return (
     <SlideOver
       open={open}
       title="Review position"
-      subtitle="Check every value. Confirming opens your wallet to sign."
+      subtitle="Check every value. Confirming opens your wallet once, for every transaction this needs."
       onClose={onCancel}
       initialFocusRef={cancelRef}
       footer={
@@ -50,6 +57,11 @@ export function ReviewSheet({
         </>
       }
     >
+      {changed && (
+        <p role="alert" className="text-body-sm rounded-md border border-border p-3 text-text-primary">
+          Spot moved: amounts updated. Check them, then confirm again.
+        </p>
+      )}
       <dl className="flex flex-col gap-4">
         <Row label="Market" value="SOL/USDC · Orca Whirlpool" mono={false} />
         <Row label="Side" value={isLong ? "Long (buy against inventory)" : "Short (provide liquidity)"} mono={false} />
@@ -58,7 +70,6 @@ export function ReviewSheet({
           value={`${summary.lowPrice.toFixed(2)}–${summary.highPrice.toFixed(2)} USDC/SOL`}
           hint={`ticks ${summary.tickLower} to ${summary.tickUpper}`}
         />
-        <Row label="Position size" value={`${summary.liquidity.toString()} liquidity units`} />
         {isLong && summary.premiumPerHourUsdc !== null && (
           <Row
             label="Est. premium per hour, at the current rate"
@@ -74,6 +85,11 @@ export function ReviewSheet({
             }
           />
         )}
+        <Row
+          label={isLong ? "Tracks (est., at spot)" : "Uses from your vault (est.)"}
+          value={formatPair(summary.amountA, summary.amountB)}
+          hint={`${summary.usdEstimate !== null ? `~$${summary.usdEstimate.toFixed(2)} · ` : ""}liquidity ${summary.liquidity.toString()}`}
+        />
         {!isLong && summary.tokenMaxA !== null && summary.tokenMaxB !== null && (
           <Row
             label="Max collateral locked (slippage cap)"

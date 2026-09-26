@@ -8,6 +8,8 @@ import { toPremiumLineData } from "./series";
 import type { PremiumPoint } from "../../../lib/indexerApi";
 
 const slotLabel = (t: Time) => `slot ${typeof t === "number" ? t : String(t)}`;
+/** Axis ticks: "502.5M", because full "slot 502546354" labels overlapped. */
+const slotTick = (t: Time) => (typeof t === "number" ? integer(t) : String(t));
 
 /**
  * The global premium index over slots, from `/premium/series`. One line, one
@@ -18,7 +20,7 @@ const slotLabel = (t: Time) => `slot ${typeof t === "number" ? t : String(t)}`;
 export function PremiumIndexChart({ points, liveIndex }: { points: PremiumPoint[]; liveIndex: bigint | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const { chart, tokens } = useLwcChart(ref, {
-    timeScale: { tickMarkFormatter: slotLabel },
+    timeScale: { tickMarkFormatter: slotTick },
     localization: { timeFormatter: slotLabel, priceFormatter: integer },
   });
 
