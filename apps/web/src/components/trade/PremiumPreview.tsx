@@ -6,6 +6,7 @@ import { useTicketSize } from "../../hooks/useTicketSize";
 import { useRequiredFreeUsdc } from "../../hooks/useRequiredFreeUsdc";
 import { formatBaseUnits } from "../../lib/format";
 import { estPremiumPerHour, requiredMargin } from "../../lib/solvency";
+import { MIN_RANGE_TICKS } from "../../lib/tickMath";
 
 const DECIMALS_B = 6;
 
@@ -18,10 +19,13 @@ const DECIMALS_B = 6;
 export function PremiumPreview() {
   const market = useChainStore((s) => s.market);
   const side = useTradeFormStore((s) => s.side);
+  const tickLower = useTradeFormStore((s) => s.tickLower);
+  const tickUpper = useTradeFormStore((s) => s.tickUpper);
   const liquidity = useTicketSize()?.liquidity ?? null;
   const requiredView = useRequiredFreeUsdc();
 
-  if (side !== "long" || !market || !liquidity) return null;
+  if (side !== "long" || !market || !liquidity || tickUpper - tickLower < MIN_RANGE_TICKS) return null;
+  const range = { tickLower, tickUpper };
 
   const risk = {
     longMarginHorizonSlots: BigInt(market.longMarginHorizonSlots.toString()),
@@ -29,7 +33,7 @@ export function PremiumPreview() {
     premiumMultiplier: BigInt(market.premiumMultiplier.toString()),
     longMarginBufferUsdc: BigInt(market.longMarginBufferUsdc.toString()),
   };
-  const perHour = estPremiumPerHour(risk, liquidity);
+  const perHour = estPremiumPerHour(risk, liquidity, range);
 
   return (
     <div className="rounded-md border border-border p-3">
@@ -38,7 +42,7 @@ export function PremiumPreview() {
       <p className="text-body-sm mt-1 text-text-muted">
         Required margin{" "}
         <span className="text-mono-sm tabular-nums text-text-primary">
-          {formatBaseUnits(requiredMargin(risk, liquidity), DECIMALS_B, 2)} USDC
+          {formatBaseUnits(requiredMargin(risk, liquidity, range), DECIMALS_B, 2)} USDC
         </span>
         {requiredView && (
           <>

@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Status | **Open.** Input for a future ADR. Nothing here changes pricing. |
+| Status | **Answered:** [ADR-0006, value-based premium](ADR-0006-value-based-premium.md) (Accepted 2026-09-26, built on branch `p5`). Premium and margin are now priced on notional `L·v`. |
 | Raised | 2026-09-26, while building the SOL/USDC trade ticket |
 | Code | `programs/perma/src/risk.rs` (`required_margin`), `premium.rs`; mirrored in `apps/web/src/lib/solvency.ts` |
 

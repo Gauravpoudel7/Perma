@@ -49,7 +49,8 @@ async function main() {
       premiumMultiplier: BigInt(marketAccount.premiumMultiplier.toString()),
       longMarginBufferUsdc: BigInt(marketAccount.longMarginBufferUsdc.toString()),
     },
-    liquidity
+    liquidity,
+    { tickLower: -40176, tickUpper: -38168 }
   );
   console.log(`Minting a LONG: liquidity=${liquidity}, required_margin=${margin} µUSDC (real ADR-0003 formula)`);
 
@@ -82,6 +83,8 @@ async function main() {
       accruedScaled: BigInt(p.accruedScaled.toString()),
       entryIndex: BigInt(p.entryIndex.toString()),
       liquidity: BigInt(p.liquidity.toString()),
+      tickLower: p.tickLower,
+      tickUpper: p.tickUpper,
     })),
     0n,
     {

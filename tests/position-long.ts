@@ -25,6 +25,7 @@ import {
 } from "@solana/web3.js";
 import { assert } from "chai";
 import { freshPrice } from "./oracle-mock";
+import { testPricing } from "./pricing";
 
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const PERMA_WHIRLPOOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -65,6 +66,7 @@ describe("position-long: inventory-gated long mint", () => {
   const program = anchor.workspace.Perma as Program;
   const conn = provider.connection;
   const me = provider.wallet.publicKey;
+  const pricing = testPricing(program, provider);
 
   const pda = (seeds: (Buffer | Uint8Array)[]) =>
     PublicKey.findProgramAddressSync(seeds, program.programId)[0];
@@ -348,6 +350,7 @@ describe("position-long: inventory-gated long mint", () => {
         })
         .rpc();
     }
+    await pricing.enable();
 
     // Top up only what is needed, capped by what the fixtures still hold.
     const min = (x: bigint, y: bigint) => (x < y ? x : y);
@@ -681,6 +684,7 @@ describe("position-long: inventory-gated long mint", () => {
       "0",
       "suite must leave no longs, or it blocks the harness suite"
     );
+    await pricing.restore();
   });
 
   it("final: inventory invariant and conservation both hold", async () => {

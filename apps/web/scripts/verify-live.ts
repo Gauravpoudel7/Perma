@@ -92,6 +92,8 @@ async function main() {
         accruedScaled: BigInt(p.accruedScaled.toString()),
         entryIndex: BigInt(p.entryIndex.toString()),
         liquidity: BigInt(p.liquidity.toString()),
+        tickLower: p.tickLower,
+        tickUpper: p.tickUpper,
       })),
       0n,
       {

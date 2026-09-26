@@ -33,6 +33,7 @@ import {
 } from "@solana/spl-token";
 import { assert, AssertionError } from "chai";
 import { freshPrice } from "./oracle-mock";
+import { testPricing } from "./pricing";
 
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const PERMA_WHIRLPOOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -80,6 +81,7 @@ describe("pause-admin: circuit breaker + risk params (component 10)", () => {
   const program = anchor.workspace.Perma as Program;
   const conn = provider.connection;
   const me = provider.wallet.publicKey;
+  const pricing = testPricing(program, provider);
 
   const pda = (seeds: (Buffer | Uint8Array)[]) =>
     PublicKey.findProgramAddressSync(seeds, program.programId)[0];
@@ -387,6 +389,7 @@ describe("pause-admin: circuit breaker + risk params (component 10)", () => {
         })
         .rpc();
     }
+    await pricing.enable();
     // A crashed earlier run must not decide this one's starting state.
     await heal();
 
@@ -416,7 +419,8 @@ describe("pause-admin: circuit breaker + risk params (component 10)", () => {
     await mintShort(seedShort);
     openShorts.push(seedShort);
     seedLong = posSet(nextNonce());
-    await mintLong(seedLong, new BN(1_000));
+    // ~0.28 USDC of notional: enough to accrue a settleable µUSDC in a few slots (ADR-0006).
+    await mintLong(seedLong, new BN(10_000_000));
   });
 
   it("starts unpaused with the demo risk parameters", async () => {
@@ -571,5 +575,6 @@ describe("pause-admin: circuit breaker + risk params (component 10)", () => {
     assert.isFalse(await isPaused(), "suite must leave the market unpaused");
     const r = await rangeOf();
     assert.equal(r.totalLongLiquidity.toString(), "0", "suite must leave no longs");
+    await pricing.restore();
   });
 });

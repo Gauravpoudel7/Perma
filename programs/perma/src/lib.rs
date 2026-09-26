@@ -18,6 +18,7 @@ pub mod position;
 pub mod premium;
 pub mod risk;
 pub mod state;
+pub mod tick_math;
 
 use adapter::*;
 use collateral::Side;
@@ -182,9 +183,9 @@ pub mod perma {
     /// Set the ADR-0003 long-margin parameters (component 10). Admin only.
     ///
     /// Writes exactly `long_margin_horizon_slots` and `long_margin_buffer_usdc`
-    /// - never `premium_rate` / `premium_multiplier`, which have no setter in
-    /// Fair MVP. Before writing, `risk::validate_risk_params` proves the
-    /// margin at `risk::MARGIN_LIQUIDITY_BOUND` (×`MAX_OPEN_LONGS`) still fits
+    /// - never `premium_rate` / `premium_multiplier`, which `set_premium_params`
+    /// owns. Before writing, `risk::validate_risk_params` proves the
+    /// margin at `risk::MARGIN_NOTIONAL_BOUND` (×`MAX_OPEN_LONGS`) still fits
     /// `u64` under the market's current rate and multiplier: an overflow at
     /// mint merely fails the mint, but an overflow at *withdraw* would lock
     /// every existing long's collateral. Rejects with `InvalidRiskParams`.
@@ -208,6 +209,46 @@ pub mod perma {
             admin: ctx.accounts.admin.key(),
             long_margin_horizon_slots,
             long_margin_buffer_usdc,
+        });
+        Ok(())
+    }
+
+    /// Set the premium rate and multiplier (ADR-0006). Admin only.
+    ///
+    /// A long pays `rate × mult / 1e12` of its notional per slot; the deployed
+    /// values are 11_111 × 1 (0.01 % per hour). Both are bounded by
+    /// `risk::MAX_PREMIUM_RATE` / `MAX_PREMIUM_MULTIPLIER`, and the margin
+    /// overflow bound is re-proved at the current horizon, else
+    /// `InvalidPremiumParams`. The index is advanced at the **old** rate first,
+    /// so the change only prices slots after this one.
+    pub fn set_premium_params(
+        ctx: Context<SetMarketPremiumParams>,
+        premium_rate: u64,
+        premium_multiplier: u64,
+    ) -> Result<()> {
+        factory::require_admin(&ctx.accounts.global_config, &ctx.accounts.admin.key())?;
+        let market = &mut ctx.accounts.market;
+        risk::validate_premium_params(
+            premium_rate,
+            premium_multiplier,
+            market.long_margin_horizon_slots,
+            market.long_margin_buffer_usdc,
+        )?;
+        // The index is created by the first mint. Before that nothing has
+        // accrued, so there is nothing to advance.
+        let info: &AccountInfo = ctx.accounts.premium_index.as_ref();
+        if info.owner == ctx.program_id && !info.data_is_empty() {
+            let mut index = GlobalPremiumIndex::try_deserialize(&mut &info.try_borrow_data()?[..])?;
+            premium::update_index(&mut index, market.premium_rate, Clock::get()?.slot)?;
+            index.try_serialize(&mut &mut info.try_borrow_mut_data()?[..])?;
+        }
+        market.premium_rate = premium_rate;
+        market.premium_multiplier = premium_multiplier;
+        emit!(MarketPremiumParamsSet {
+            market: market.key(),
+            admin: ctx.accounts.admin.key(),
+            premium_rate,
+            premium_multiplier,
         });
         Ok(())
     }
@@ -618,6 +659,11 @@ pub mod perma {
             PermaError::InvalidLegType
         );
         require!(liquidity > 0, PermaError::ZeroAmount);
+        // ADR-0006: no new long or short on a range narrower than 32 ticks.
+        require!(
+            i64::from(tick_upper) - i64::from(tick_lower) >= i64::from(risk::MIN_RANGE_TICKS),
+            PermaError::RangeTooNarrow
+        );
 
         // ADR-0004: new exposure opens only at a pool spot near a fresh,
         // confident reference. Both legs pass `whirlpool` for this read.
@@ -1051,7 +1097,8 @@ pub mod perma {
             let free = a.user_collateral.free(Side::B);
             let maint = risk::maintenance_free_usdc(&a.user_collateral, &longs, projected, &a.market)?;
             require!(free < maint, PermaError::AccountSolvent);
-            let target_margin = risk::required_margin(&a.market, a.perma_position.liquidity)?;
+            let pos = &a.perma_position;
+            let target_margin = risk::required_margin(&a.market, pos.liquidity, pos.tick_lower, pos.tick_upper)?;
             (free, maint - free, target_margin)
         };
 
@@ -1110,13 +1157,7 @@ pub mod perma {
             );
             let price_update = a.price_update.as_ref().ok_or(PermaError::OracleUnavailable)?;
             let msg = oracle::check_exercise_price(price_update, get_sqrt_price_x64(&pool))?;
-            let fee = risk::force_exercise_fee(
-                &a.market,
-                pos.liquidity,
-                pos.tick_lower,
-                pos.tick_upper,
-                tick,
-            )?;
+            let fee = risk::force_exercise_fee(pos.liquidity, pos.tick_lower, pos.tick_upper)?;
 
             // The fee leaves the caller's free USDC exactly as a withdraw would.
             let caller = &a.caller_collateral;
@@ -2253,6 +2294,8 @@ fn mint_long_inner<'info>(
         current_index,
         &ctx.accounts.market,
         size,
+        tick_lower,
+        tick_upper,
     )?;
 
     let pos = &mut ctx.accounts.perma_position;
@@ -3040,6 +3083,25 @@ pub struct SetMarketRiskParams<'info> {
     pub market: Account<'info, Market>,
 }
 
+/// `set_premium_params` (ADR-0006): the risk setter's accounts plus the
+/// premium index, advanced before the rate changes when it exists.
+#[derive(Accounts)]
+pub struct SetMarketPremiumParams<'info> {
+    /// Must equal `global_config.admin`; checked in the handler.
+    pub admin: Signer<'info>,
+
+    #[account(seeds = [seeds::GLOBAL_CONFIG], bump = global_config.bump)]
+    pub global_config: Account<'info, GlobalConfig>,
+
+    #[account(mut, seeds = [seeds::MARKET, market.whirlpool.as_ref()], bump = market.bump)]
+    pub market: Account<'info, Market>,
+
+    /// CHECK: the market's premium index PDA (seeds-checked). Unchecked because
+    /// the first mint creates it, and the rate must be settable before that.
+    #[account(mut, seeds = [seeds::PREMIUM_INDEX, market.key().as_ref()], bump)]
+    pub premium_index: UncheckedAccount<'info>,
+}
+
 /// `transfer_admin` (P1). Writes the existing `GlobalConfig.admin` bytes -
 /// no payer, no `system_program`, no realloc.
 #[derive(Accounts)]
@@ -3429,6 +3491,14 @@ pub struct MarketRiskParamsSet {
     pub admin: Pubkey,
     pub long_margin_horizon_slots: u64,
     pub long_margin_buffer_usdc: u64,
+}
+
+#[event]
+pub struct MarketPremiumParamsSet {
+    pub market: Pubkey,
+    pub admin: Pubkey,
+    pub premium_rate: u64,
+    pub premium_multiplier: u64,
 }
 
 #[event]

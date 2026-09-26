@@ -219,9 +219,9 @@ Every rejected vector also asserts the `perma_position` PDA was not created.
 
 ## 8. Liquidation + Force-Exercise Vectors — P4 ([ADR-0005](../adr/ADR-0005-force-exercise-and-liquidation.md))
 
-These use the §0 parameters and the demo risk defaults: `required_margin(L) = L + 1_000_000`. The ADR-0005 §3 constants are the only other inputs: `MAINT_MARGIN_BPS = 7_500`, `FX_BAND_TICKS = 310`, `FX_FEE_BASE_SLOTS = 100`, `FX_FEE_MAX_HALVINGS = 10`.
+Since [ADR-0006](../adr/ADR-0006-value-based-premium.md), premium and margin are priced on **notional** `N = L·v`, where `v = √P_upper − √P_lower` of the long's range. These vectors use **test pricing**: `rate = 1_000_000`, `mult = 1_000` (the ceilings, i.e. 0.1 % of notional per slot), horizon 1,000 slots and buffer 1 USDC. With those, `required_margin = ⌈N⌉ + 1_000_000`. The long sits on the demo range `[-40176, -38168)`, sized so `⌈N⌉ = 50_000_000` (`L = ⌊50e6 · 2^64 / v⌋`, `risk.rs` `l_for`). So every Fair-era number below is unchanged, re-based from `L` to `N`. The other inputs are ADR-0005 §3: `MAINT_MARGIN_BPS = 7_500`, `FX_BAND_TICKS = 310`, `FX_FEE_BPS = 10`.
 
-### Liquidation (one long, `L = 50_000_000`, 50 000 µUSDC accrued per slot)
+### Liquidation (one long, `N = 50 USDC` of notional, 50 000 µUSDC accrued per slot)
 
 `maint = accrued + ⌈0.75 × 51_000_000⌉ = accrued + 38_250_000`. Bonus = `min(R / 2, D, 38_250_000)`, where `D = maint − free` and `R = free − paid`.
 
@@ -231,25 +231,35 @@ These use the §0 parameters and the demo risk defaults: `required_margin(L) = L
 | L2 `LIQ_INSOLVENT_OK` | `40_000_000` | `5_000_000` (100 slots) | `43_250_000` | closed | `5_000_000` | `3_250_000` | `31_750_000` | `0` |
 | L3 bonus capped by R/2 | `6_000_000` | `5_000_000` | `43_250_000` | closed | `5_000_000` | `500_000` | `500_000` | `0` |
 | L4 `LIQ_PAUSE_INTERACTION` (shortfall) | `1_000_000` | `5_000_000` | `43_250_000` | closed, **market paused** (4 USDC ≥ 1 USDC) | `1_000_000` | `0` | `0` | `4_000_000` |
-| L5 `LIQ_DUST_NO_PAUSE` (`L = 1_000_000`, horizon 20) | `25_000` | `60_000` (60 slots) | `75_001` | closed, **market stays open** | `25_000` | `0` | `0` | `35_000` (< 1 USDC, written off) |
+| L5 `LIQ_DUST_NO_PAUSE` (`N = 1 USDC`, horizon 20) | `25_000` | `60_000` (60 slots) | `75_001` | closed, **market stays open** | `25_000` | `0` | `0` | `35_000` (< 1 USDC, written off) |
 
 The boundary is `free == maint`, which is solvent (`AccountSolvent`). One µUSDC less is liquidatable.
 
 The pause floor is `PAUSE_SHORTFALL_MIN_USDC = 1_000_000`: a shortfall of `999_999` is written off, `1_000_000` pauses. Only `GlobalConfig.admin` can `unpause_market`.
 
-### Force-exercise fee (`base = ⌈L / 10⌉` at the defaults)
+### Force-exercise fee (`fee = max(1, ⌈N × 10 / 10_000⌉)`, ADR-0006)
 
-Demo range `[-40176, -38168)`: `hw = 1004`, `mid = -39172`, eligible when `tick ≥ -37858` or `tick < -40486`.
+Demo range `[-40176, -38168)`: eligible when `tick ≥ -37858` or `tick < -40486`. The fee does not depend on the tick.
 
-| Case | `L` | Tick | `n = max(1, \|tick − mid\| / hw)` | Fee (µUSDC) |
-|---|---|---|---|---|
-| `FX_IN_RANGE_REJECT` | any | `-38168` … `-37859` (inside band) | — | **`NotExercisable`** |
-| `FX_NEAR_RANGE_FEE` | `50_000_000` | `-37858` | `1` | `5_000_000` |
-| `FX_FAR_RANGE_FEE` | `50_000_000` | `-34152` | `5` | `312_500` |
-| halving floor | `50_000_000` | `-20000` | `19` → capped at 10 halvings | `4_882` |
-| minimum fee | `1` | `-37858` | `1` | `1` (floor) |
+| Case | Notional | Fee (µUSDC) |
+|---|---|---|
+| `FX_IN_RANGE_REJECT` | any, tick `-38168` … `-37859` (inside band) | **`NotExercisable`** |
+| `FX_FEE` | `50 USDC` | `50_000` |
+| rounding up | `1_500 µUSDC` | `2` |
+| minimum fee | `L = 1` (≈ 0.03 µUSDC) | `1` (floor) |
+| width-neutral | `50 USDC` on a 32-tick range | `50_000` |
 
-Unit tests: `programs/perma/src/risk.rs` (`p4_…`). Integration: `tests/liquidation.ts`, `tests/force-exercise.ts`.
+### Value-based premium (ADR-0006)
+
+| Vector | Where | Asserts |
+|---|---|---|
+| Orca exact-bit values ±2^0…2^18, MIN/MAX | `tick_math.rs`, `apps/web/test/tickMath.test.ts` | `sqrt_price_x64` equals Orca's constants |
+| Equal notional, any width | `premium.rs`, `risk.rs`, `solvency.test.ts`, `tests/value-pricing.ts` | 32 / 80 / 2048-tick longs of equal `N` owe equal premium and margin (±1 µUSDC; ±3 % per slot on localnet) |
+| Shipped margin | `solvency.test.ts` | `N = 120 USDC` at 11_111 × 1, 216_000 slots → `1_287_998` µUSDC |
+| `RangeTooNarrow` | `tests/value-pricing.ts` | a 24-tick short or long is refused |
+| `set_premium_params` | `risk.rs`, `tests/value-pricing.ts` | admin only; 0 or above-ceiling refused; index advanced at the old rate |
+
+Unit tests: `programs/perma/src/risk.rs` (`p4_…`), `premium.rs`, `tick_math.rs`. Integration: `tests/liquidation.ts` (liquidation and force exercise), `tests/value-pricing.ts`.
 
 ---
 

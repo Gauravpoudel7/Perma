@@ -76,6 +76,8 @@ export function usePositionSummary(position: PositionWithPubkey): PositionSummar
         accruedScaled: BigInt(position.accruedScaled.toString()),
         entryIndex: BigInt(position.entryIndex.toString()),
         liquidity: BigInt(position.liquidity.toString()),
+        tickLower: position.tickLower,
+        tickUpper: position.tickUpper,
       },
       projected,
       BigInt(market.premiumMultiplier.toString())

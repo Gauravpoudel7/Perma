@@ -35,7 +35,7 @@ Sources are Panoptic's public docs and the Code4rena audit repos (2024-09 and 20
 | Bonus | `min(balance / 2, requirement − balance)` at TWAP. | `min(free_after_premium / 2, shortfall, m × margin of the closed long)` (§1). The last term is new: it stops a split liquidation from out-earning a single one. |
 | Bad debt | Premium the liquidatee paid is haircut; the remaining loss is absorbed by the pool's LPs (socialized). | **Never socialized** (PRD B30). A shortfall closes the long, auto-pauses the market, and the shorts keep the unpaid part as their existing `premium_receivable` carry (§4). |
 | Force exercise eligible | At least one long leg with the TWAP outside its range. | The long's range is out of range by a margin that guarantees the *Pyth* price is outside it too (§2). |
-| Force fee | `FORCE_EXERCISE_COST >> (n − 1)`, where `n` = half-widths between price and strike (max over legs, floor 1). Docs: ~1.024 % near, 0.01 % far. Paid by the exercisor to the exercisee. | Same halving schedule, and the same payer and payee. The base is premium-denominated, because a PERMA long has no token notional (§2). |
+| Force fee | `FORCE_EXERCISE_COST >> (n − 1)`, where `n` = half-widths between price and strike (max over legs, floor 1). Docs: ~1.024 % near, 0.01 % far. Paid by the exercisor to the exercisee. | Same payer and payee. **Amended by [ADR-0006](ADR-0006-value-based-premium.md):** a flat 0.1 % of the long's notional `L·v`, with no halving (§2). |
 | Exercisor | Anyone. Must be solvent afterwards (133 % buffer). | Anyone with a PERMA account in the market. Must pass the existing withdraw solvency gate for the fee (§2). |
 | Who liquidates | Anyone; bots are encouraged. | Anyone (Q5). |
 
@@ -47,6 +47,7 @@ Sources are Panoptic's public docs and the Code4rena audit repos (2024-09 and 20
   - The signer is the liquidator, with their own `UserCollateral` in this market.
   - The target is a long plus its owner's `UserCollateral`, `RangePremiumState`, range vault, and premium index.
   - Remaining accounts: the owner's **full** open-long list, validated by the existing `risk::collect_open_longs` (`risk.rs:230`). The target must be in that list.
+- **Premium and margin are priced on notional since [ADR-0006](ADR-0006-value-based-premium.md).** `required_margin` below is `⌈horizon × rate × mult × L·v / (2^64·1e12)⌉ + buffer`. The maintenance and bonus formulas are unchanged; they read that margin.
 - **Maintenance requirement.** `maint = premium_owed_usdc + Σ payable_if_settled_now + ⌈Σ required_margin × MAINT_MARGIN_BPS / 10_000⌉`, with **`MAINT_MARGIN_BPS = 7_500`**. Owed premium always counts in full; only the forward margin is discounted. The initial requirement at mint and withdraw is unchanged (100 % of margin), so the ratio of initial to maintenance margin is Panoptic's 4/3.
 - **Eligible** when `free_usdc < maint`. Otherwise it fails with `AccountSolvent` and nothing moves.
 - **Effect, in order:**
@@ -81,10 +82,10 @@ Sources are Panoptic's public docs and the Code4rena audit repos (2024-09 and 20
   2. Accrue the target long and pay its premium **in full** (the `pay_long_premium_cash` path). An owner who cannot pay fails `InsufficientCollateralForLoss`, which routes the case to liquidation first (§5).
   3. The fee moves from the exercisor's free USDC to the owner's free USDC, as an internal ledger move. It is gated by `risk::check_withdraw_allowed(exercisor, longs, …, 0, fee)`, the same gate a withdraw of `fee` would face.
   4. `close_long`, decrement `total_long_liquidity`, and close the account with rent to the owner.
-- **Fee.**
-  - `base = required_margin_with(FX_FEE_BASE_SLOTS, rate, mult, 0, L)`: the premium the long would pay over **`FX_FEE_BASE_SLOTS = 100`** slots, rounded up. That is 10 % of the 1000-slot margin horizon, mirroring Panoptic's ~1.024 % fee against a 10 % buyer collateral.
-  - `hw = max(1, (tick_upper − tick_lower) / 2)`, `mid = tick_lower + hw`, and `n = max(1, |tick − mid| / hw)`.
-  - **`fee = max(1, base >> min(n − 1, FX_FEE_MAX_HALVINGS))`**, with **`FX_FEE_MAX_HALVINGS = 10`** (Panoptic's 1024 → 1 floor).
+- **Fee (amended 2026-09-26 by [ADR-0006](ADR-0006-value-based-premium.md) Q3).**
+  - **`fee = max(1, ⌈L·v × FX_FEE_BPS / 10_000⌉)`** µUSDC, with **`FX_FEE_BPS = 10`** (0.1 % of the long's notional; `v = √P_upper − √P_lower`).
+  - It no longer depends on how far out of range the pool is.
+  - *Superseded:* the original fee was 100 slots of premium on `L`, halved per half-width from the range midpoint (`FX_FEE_BASE_SLOTS`, `FX_FEE_MAX_HALVINGS`). Once premium became notional-based, that base shrank to almost nothing, so the ADR-0006 answer replaced it.
 - **The long's P&L stays 0.** There is still no counterparty for intrinsic value (ADR-0004). "Exercise" is a close at no intrinsic payout, and the fee is the owner's compensation.
 
 #### 3. Numbers (the only place they are set; fixtures in `FIXTURES-AND-VECTORS.md` §8)
@@ -94,8 +95,7 @@ Sources are Panoptic's public docs and the Code4rena audit repos (2024-09 and 20
 | `MAINT_MARGIN_BPS` | 7_500 | `risk.rs` |
 | `FX_BAND_TICKS` | 310 | `oracle.rs` |
 | `FX_MAX_STALENESS_SECS` | 30 | `oracle.rs` |
-| `FX_FEE_BASE_SLOTS` | 100 | `risk.rs` |
-| `FX_FEE_MAX_HALVINGS` | 10 | `risk.rs` |
+| `FX_FEE_BPS` | 10 (0.1 % of notional; replaces `FX_FEE_BASE_SLOTS` / `FX_FEE_MAX_HALVINGS`, ADR-0006) | `risk.rs` |
 | `PAUSE_SHORTFALL_MIN_USDC` | 1_000_000 (1 USDC) | `risk.rs` (amended 2026-09-26, §4) |
 
 These are demo values. Change them only by amending this ADR. They are constants rather than `Market` fields: YAGNI until a second market needs different ones.
@@ -143,7 +143,7 @@ These are demo values. Change them only by amending this ADR. They are constants
 |---|---|---|
 | Q1 | Account-value model | **A: premium-only.** No price on the liquidation path. |
 | Q2 | Maintenance and bonus | `MAINT_MARGIN_BPS = 7_500`. Bonus `min(R/2, D, m × margin)`. |
-| Q3 | Force fee | 100-slot premium base, halving per half-width from the range midpoint, at most 10 halvings. |
+| Q3 | Force fee | 0.1 % of the long's notional (amended by ADR-0006; originally a 100-slot premium base with distance halving). |
 | Q4 | P4 staleness | 30 s, force exercise only. |
 | Q5 | Who may call | Anyone with a PERMA account in the market; caller ≠ owner. |
 | Q6 | Pause | Both allowed while paused; a shortfall of 1 USDC or more auto-pauses, smaller ones are written off (amended 2026-09-26). Only `GlobalConfig.admin` unpauses. |

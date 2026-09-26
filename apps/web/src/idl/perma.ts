@@ -2560,9 +2560,9 @@ export type Perma = {
         "Set the ADR-0003 long-margin parameters (component 10). Admin only.",
         "",
         "Writes exactly `long_margin_horizon_slots` and `long_margin_buffer_usdc`",
-        "- never `premium_rate` / `premium_multiplier`, which have no setter in",
-        "Fair MVP. Before writing, `risk::validate_risk_params` proves the",
-        "margin at `risk::MARGIN_LIQUIDITY_BOUND` (×`MAX_OPEN_LONGS`) still fits",
+        "- never `premium_rate` / `premium_multiplier`, which `set_premium_params`",
+        "owns. Before writing, `risk::validate_risk_params` proves the",
+        "margin at `risk::MARGIN_NOTIONAL_BOUND` (×`MAX_OPEN_LONGS`) still fits",
         "`u64` under the market's current rate and multiplier: an overflow at",
         "mint merely fails the mint, but an overflow at *withdraw* would lock",
         "every existing long's collateral. Rejects with `InvalidRiskParams`."
@@ -2642,6 +2642,130 @@ export type Perma = {
         },
         {
           "name": "longMarginBufferUsdc",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "setPremiumParams",
+      "docs": [
+        "Set the premium rate and multiplier (ADR-0006). Admin only.",
+        "",
+        "A long pays `rate × mult / 1e12` of its notional per slot; the deployed",
+        "values are 11_111 × 1 (0.01 % per hour). Both are bounded by",
+        "`risk::MAX_PREMIUM_RATE` / `MAX_PREMIUM_MULTIPLIER`, and the margin",
+        "overflow bound is re-proved at the current horizon, else",
+        "`InvalidPremiumParams`. The index is advanced at the **old** rate first,",
+        "so the change only prices slots after this one."
+      ],
+      "discriminator": [
+        109,
+        191,
+        78,
+        125,
+        119,
+        46,
+        38,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Must equal `global_config.admin`; checked in the handler."
+          ],
+          "signer": true
+        },
+        {
+          "name": "globalConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.whirlpool",
+                "account": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "premiumIndex",
+          "docs": [
+            "the first mint creates it, and the rate must be settable before that."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  101,
+                  109,
+                  105,
+                  117,
+                  109,
+                  95,
+                  105,
+                  110,
+                  100,
+                  101,
+                  120
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "premiumRate",
+          "type": "u64"
+        },
+        {
+          "name": "premiumMultiplier",
           "type": "u64"
         }
       ]
@@ -3877,6 +4001,19 @@ export type Perma = {
       ]
     },
     {
+      "name": "marketPremiumParamsSet",
+      "discriminator": [
+        122,
+        204,
+        149,
+        122,
+        41,
+        73,
+        52,
+        47
+      ]
+    },
+    {
       "name": "marketRiskParamsSet",
       "discriminator": [
         14,
@@ -4201,6 +4338,16 @@ export type Perma = {
       "code": 6043,
       "name": "selfTarget",
       "msg": "Cannot liquidate or force-exercise your own position"
+    },
+    {
+      "code": 6044,
+      "name": "rangeTooNarrow",
+      "msg": "Range is narrower than the minimum width"
+    },
+    {
+      "code": 6045,
+      "name": "invalidPremiumParams",
+      "msg": "Premium parameters are out of bounds"
     }
   ],
   "types": [
@@ -4886,6 +5033,30 @@ export type Perma = {
           {
             "name": "admin",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "marketPremiumParamsSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "premiumRate",
+            "type": "u64"
+          },
+          {
+            "name": "premiumMultiplier",
+            "type": "u64"
           }
         ]
       }

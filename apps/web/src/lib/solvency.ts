@@ -1,26 +1,33 @@
+import { notionalQ64, scaledCharge } from "./tickMath";
+
 /**
  * The ADR-0003 / component-09 solvency formula, and nowhere else.
  *
  * Fair MVP reads no price for solvency — there is no oracle, no TWAP, and no
  * P&L. A long's obligation is purely a function of time and liquidity: what
  * it has accrued, plus a margin for what it will accrue over the next
- * `long_margin_horizon_slots`. This module is the ONLY place that formula is
+ * `long_margin_horizon_slots`, priced on its notional `L × v` (ADR-0006: `v`
+ * = √P(upper) − √P(lower), from `tickMath.ts`). This module is the ONLY place that formula is
  * implemented; the Trade preflight and the Vault "Required free USDC" tile
  * both import it rather than reimplementing it per-screen.
  *
  * All math is bigint and rounds UP (ceiling), matching
  * `programs/perma/src/risk.rs` exactly — never floating point, never a
- * shortcut. At the deployed defaults (`horizon=1000, rate=1_000_000,
- * multiplier=1_000`) this collapses to `requiredMargin(L) == L + 1_000_000`
- * (L µUSDC + 1 USDC) — call that out in a comment where it's surprising,
- * never hardcode it: a future deploy could change the defaults, and this
- * module always reads the live `Market` fields.
+ * shortcut. At the deployed defaults (`horizon=216_000, rate=11_111,
+ * multiplier=1`) margin is ≈ 2.4 % of notional + 1 USDC; this module always
+ * reads the live `Market` fields rather than assuming them.
  */
 
 export const PREMIUM_SCALE = 1_000_000_000_000n;
 
 function ceilDiv(a: bigint, b: bigint): bigint {
   return (a + b - 1n) / b;
+}
+
+/** The two ticks a long's notional is priced on. */
+export interface TickRange {
+  tickLower: number;
+  tickUpper: number;
 }
 
 export interface MarketRiskFields {
@@ -30,14 +37,16 @@ export interface MarketRiskFields {
   longMarginBufferUsdc: bigint;
 }
 
-/** `ceil(horizon × rate × L × mult / PREMIUM_SCALE) + buffer`, in µUSDC. */
-export function requiredMargin(market: MarketRiskFields, liquidity: bigint): bigint {
+const Q64 = 1n << 64n;
+
+/** `⌈horizon × rate × mult × (L × v) / (2^64 × PREMIUM_SCALE)⌉ + buffer`, in µUSDC (`risk::required_margin`). */
+export function requiredMargin(market: MarketRiskFields, liquidity: bigint, range: TickRange): bigint {
   const raw =
     market.longMarginHorizonSlots *
     market.premiumRate *
-    liquidity *
-    market.premiumMultiplier;
-  return ceilDiv(raw, PREMIUM_SCALE) + market.longMarginBufferUsdc;
+    market.premiumMultiplier *
+    notionalQ64(liquidity, range.tickLower, range.tickUpper);
+  return ceilDiv(raw, Q64 * PREMIUM_SCALE) + market.longMarginBufferUsdc;
 }
 
 // 400ms/slot -> 9000 slots/hour. Display-only conversion of the per-slot
@@ -46,15 +55,24 @@ const SLOTS_PER_HOUR = 9000n;
 
 /**
  * COPY-DECK §4.1 "Est. premium per hour, at the current rate", in µUSDC:
- * `rate × L × mult × 9000 / PREMIUM_SCALE`, rounded down (an estimate, not a
- * gate — the gate is `requiredMargin`). Shared by the ticket preview and the
- * review sheet so the two never disagree.
+ * 9000 slots of `premium::scaled_charge` on the long's notional, rounded down
+ * (an estimate, not a gate — the gate is `requiredMargin`). Shared by the
+ * ticket preview and the review sheet so the two never disagree.
  */
 export function estPremiumPerHour(
   market: Pick<MarketRiskFields, "premiumRate" | "premiumMultiplier">,
-  liquidity: bigint
+  liquidity: bigint,
+  range: TickRange
 ): bigint {
-  return (market.premiumRate * liquidity * market.premiumMultiplier * SLOTS_PER_HOUR) / PREMIUM_SCALE;
+  const scaled = scaledCharge(
+    market.premiumRate * SLOTS_PER_HOUR,
+    market.premiumMultiplier,
+    liquidity,
+    range.tickLower,
+    range.tickUpper,
+    false
+  );
+  return scaled / PREMIUM_SCALE;
 }
 
 /**
@@ -94,7 +112,7 @@ export function projectedIndex(
   return index.currentIndex + elapsed * premiumRate;
 }
 
-export interface LongLiabilityFields {
+export interface LongLiabilityFields extends TickRange {
   accruedScaled: bigint;
   entryIndex: bigint;
   liquidity: bigint;
@@ -111,7 +129,8 @@ export function payableIfSettledNow(
   premiumMultiplier: bigint
 ): bigint {
   const dIndex = projected > pos.entryIndex ? projected - pos.entryIndex : 0n;
-  const scaled = pos.accruedScaled + dIndex * pos.liquidity * premiumMultiplier;
+  const scaled =
+    pos.accruedScaled + scaledCharge(dIndex, premiumMultiplier, pos.liquidity, pos.tickLower, pos.tickUpper, true);
   return ceilDiv(scaled, PREMIUM_SCALE);
 }
 
@@ -130,7 +149,7 @@ export function requiredFreeUsdc(
     (sum, pos) =>
       sum +
       payableIfSettledNow(pos, projected, market.premiumMultiplier) +
-      requiredMargin(market, pos.liquidity),
+      requiredMargin(market, pos.liquidity, pos),
     premiumOwedUsdc
   );
 }
@@ -145,26 +164,30 @@ export function canMintLong(
   freeB: bigint,
   existingRequired: bigint,
   newLiquidity: bigint,
-  market: MarketRiskFields
+  market: MarketRiskFields,
+  range: TickRange
 ): boolean {
-  return freeB >= existingRequired + requiredMargin(market, newLiquidity);
+  return freeB >= existingRequired + requiredMargin(market, newLiquidity, range);
 }
 
 
 /**
- * The largest long `L` that `canMintLong` still allows: `requiredMargin(L)`
- * must fit in `freeB − existingRequired`. Exact integer inverse, so the
- * ticket's "Max" never offers a size the program refuses with InsolventMint.
+ * The largest long `L` that `canMintLong` still allows on `range`: the margin
+ * term `⌈q × L × v / (2^64 × 1e12)⌉` must fit in `freeB − existingRequired −
+ * buffer`. For integers, `⌈x / D⌉ ≤ R ⇔ x ≤ R × D`, so this is an exact
+ * inverse and the ticket's "Max" never offers a size the program refuses.
  */
 export function maxAffordableLiquidity(
   market: MarketRiskFields,
   freeB: bigint,
-  existingRequired: bigint
+  existingRequired: bigint,
+  range: TickRange
 ): bigint {
   const room = freeB - existingRequired - market.longMarginBufferUsdc;
-  const perUnit = market.longMarginHorizonSlots * market.premiumRate * market.premiumMultiplier;
-  if (room <= 0n || perUnit === 0n) return 0n;
-  return (room * PREMIUM_SCALE) / perUnit;
+  const perNotional = market.longMarginHorizonSlots * market.premiumRate * market.premiumMultiplier;
+  const v = notionalQ64(1n, range.tickLower, range.tickUpper);
+  if (room < 0n || perNotional === 0n || v === 0n) return 0n;
+  return (room * Q64 * PREMIUM_SCALE) / (perNotional * v);
 }
 
 // --- Short-side entitlement (display only — mirrors premium::claimable_for /

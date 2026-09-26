@@ -10,6 +10,7 @@
  *  - L5  a dust shortfall (< 1 USDC) is written off: no bonus, NO pause
  *  - FX  only `FX_BAND_TICKS` past the range AND with a fresh (30 s) Pyth
  *        reference; the owner's premium is paid and the caller pays the fee
+ *        (0.1 % of notional, ADR-0006)
  *  - SPOOF the open-long list cannot be dropped or padded; nobody targets themselves
  * Vectors: docs/06-testing/FIXTURES-AND-VECTORS.md §8.
  */
@@ -32,6 +33,8 @@ import {
 } from "@solana/spl-token";
 import { assert, AssertionError } from "chai";
 import { freshPrice, poolSpotE8, setPrice } from "./oracle-mock";
+import { liquidityFor, setPricing, SHIPPED_HORIZON, SHIPPED_MULT, SHIPPED_RATE, TEST_MULT, TEST_RATE } from "./pricing";
+import { forceExerciseFee } from "../apps/web/src/lib/tickMath";
 
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const PERMA_WHIRLPOOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -59,28 +62,22 @@ const DEMO = [-40176, -38168] as const;
 const FX = [-38800, -38400] as const;
 
 const SHORT_L = new BN(100_000_000);
+/** The demo short is bigger here: two longs below borrow 10 USDC of notional (7.1e8 L) each. */
+const DEMO_SHORT_L = new BN(2_000_000_000);
 const MAX_A = new BN(1_000_000_000);
 const MAX_B = new BN(100_000_000);
 
-/** `state::risk_defaults`, restored in `after`. */
+/** Test pricing (ADR-0006): 0.1 % of notional per slot, restored to the shipped values in `after`. */
 const HORIZON = 1_000;
 const BUFFER = 1_000_000;
 /** Liquidation runs at a 20-slot horizon so accrual crosses maintenance in seconds. */
 const LIQ_HORIZON = 20;
 const LIQ_BUFFER = 1;
-const L50 = 50_000_000n;
-/** margin(50e6) at 20 slots / 1 µUSDC = 20 × 50_000 + 1; maintenance takes ⌈75 %⌉. */
-const LIQ_MARGIN = 1_000_001n;
-const LIQ_MAINT = 750_001n;
-
-/** ADR-0005 §2 fee: 100 slots of premium, halved per half-width from the midpoint. */
-const fxFee = (L: bigint, lo: number, hi: number, tick: number) => {
-  const base = (100n * 1_000_000n * L * 1_000n) / 1_000_000_000_000n;
-  const hw = Math.max(1, Math.trunc((hi - lo) / 2));
-  const n = Math.max(1, Math.trunc(Math.abs(tick - (lo + hw)) / hw));
-  const fee = base >> BigInt(Math.min(n - 1, 10));
-  return fee > 0n ? fee : 1n;
-};
+/** A long with 10 USDC of notional on the demo range: it owes 10_000 µUSDC per slot. */
+const L10 = liquidityFor(10_000_000n, DEMO[0], DEMO[1]);
+/** margin = ⌈20 slots × 0.1 % × 10 USDC⌉ + 1 µUSDC; maintenance takes ⌈75 %⌉. */
+const LIQ_MARGIN = 200_001n;
+const LIQ_MAINT = 150_001n;
 
 const startTickIndex = (t: number) =>
   Math.floor(t / (TICK_ARRAY_SIZE * TICK_SPACING)) * (TICK_ARRAY_SIZE * TICK_SPACING);
@@ -186,7 +183,7 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
 
   const mintShort = async (p: P) =>
     program.methods
-      .mintPosition(LEG_SHORT, p.range[0], p.range[1], SHORT_L, MAX_A, MAX_B, new BN(p.nonce))
+      .mintPosition(LEG_SHORT, p.range[0], p.range[1], p.range === DEMO ? DEMO_SHORT_L : SHORT_L, MAX_A, MAX_B, new BN(p.nonce))
       .accounts(await mintAccounts(p))
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
       .signers([p.positionMint])
@@ -315,10 +312,7 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
   const totalLong = async (range: readonly number[]) =>
     BigInt((await (program.account as any).rangePremiumState.fetch(rangePda(range))).totalLongLiquidity.toString());
   const isPaused = async () => (await (program.account as any).market.fetch(market)).isPaused as boolean;
-  const poolTick = async () => (await conn.getAccountInfo(PERMA_WHIRLPOOL))!.data.readInt32LE(81);
   const admin = { admin: me, globalConfig, market };
-  const setRisk = (h: number, b: number) =>
-    program.methods.setMarketRiskParams(new BN(h), new BN(b)).accounts(admin).rpc();
   const unpause = async () => {
     if (await isPaused()) await program.methods.unpauseMarket().accounts(admin).rpc();
   };
@@ -364,6 +358,7 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
     const topA = hA < 2_000_000_000n ? 2_000_000_000n - hA : 0n;
     const topB = hB < 150_000_000n ? 150_000_000n - hB : 0n;
     if (topA + topB > 0n) await deposit(me, topA, topB);
+    await setPricing(program, me, { rate: TEST_RATE, mult: TEST_MULT, horizon: HORIZON });
 
     for (const range of [DEMO, FX]) {
       const s = posSet(me, range);
@@ -375,18 +370,18 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
   describe("liquidate_long", () => {
     let alice: Keypair;
     let a1: P;
-    const FREE0 = 1_600_000n;
+    const FREE0 = 320_000n; // 1.6 × LIQ_MARGIN
 
     before(async () => {
-      await setRisk(LIQ_HORIZON, LIQ_BUFFER);
+      await setPricing(program, me, { rate: TEST_RATE, mult: TEST_MULT, horizon: LIQ_HORIZON, buffer: LIQ_BUFFER });
       alice = await newUser(FREE0);
       users.push(alice);
       a1 = posSet(alice.publicKey, DEMO);
-      await mintLong(a1, L50, [alice]); // needs margin 1_000_001 <= 1.6e6
+      await mintLong(a1, L10, [alice]); // needs margin 200_001 <= 320_000
     });
 
     it("L1: a healthy account is refused AccountSolvent and nothing moves", async () => {
-      // Owed after a few slots is ~150k; maintenance = owed + 750_001 < 1.6e6.
+      // Owed after a few slots is ~30k; maintenance = owed + 150_001 < 320_000.
       await expectErr(liquidate(a1), "AccountSolvent");
       assert.equal(await freeB(alice.publicKey), FREE0);
       assert.equal((await uc(alice.publicKey)).openLongs, 1);
@@ -402,7 +397,7 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
     });
 
     it("L2: below maintenance the premium is paid in full and bonus = min(R/2, D, 0.75 × margin)", async () => {
-      // 50_000 µUSDC/slot: maintenance crosses 1.6e6 after 17 slots, the
+      // 10_000 µUSDC/slot: maintenance crosses 320_000 after 17 slots, the
       // premium alone after 32. Liquidate in between.
       await waitSlots(22);
       const vault = rangeVaultPda(DEMO);
@@ -420,18 +415,18 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
       assert.equal(await freeB(alice.publicKey), FREE0 - paid - bonus, "conservation");
       assert.equal((await uc(alice.publicKey)).openLongs, 0);
       assert.isNull(await conn.getAccountInfo(a1.permaPosition), "position closed to its owner");
-      assert.equal(long0 - (await totalLong(DEMO)), L50);
+      assert.equal(long0 - (await totalLong(DEMO)), L10);
       assert.isFalse(await isPaused());
     });
 
     it("L5: a tiny insolvent account cannot pause the market (dust shortfall is written off)", async () => {
-      // L = 1e6 owes 1_000 µUSDC/slot; margin at 20 slots = 20_001. With
-      // 25_000 free it is liquidatable after ~10 slots and short after ~25.
+      // 1 USDC of notional owes 1_000 µUSDC/slot; margin at 20 slots = 20_001.
+      // With 25_000 free it is liquidatable after ~10 slots and short after ~25.
       const FREE = 25_000n;
       const dusty = await newUser(FREE);
       users.push(dusty);
       const d = posSet(dusty.publicKey, DEMO);
-      await mintLong(d, 1_000_000n, [dusty]);
+      await mintLong(d, liquidityFor(1_000_000n, DEMO[0], DEMO[1]), [dusty]);
       await waitSlots(60); // owes >= 60_000 > free, far below 1 USDC
 
       const vault = rangeVaultPda(DEMO);
@@ -454,13 +449,13 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
     });
 
     it("L4: shortfall pays what is there, no bonus, pauses; a paused market still liquidates", async () => {
-      const free = 2n * LIQ_MARGIN + 500_000n; // two margins + 10 slots of the first long's accrual
+      const free = 2n * LIQ_MARGIN + 100_000n; // two margins + 10 slots of the first long's accrual
       await topUpTo(alice, free);
       const b1 = posSet(alice.publicKey, DEMO);
       const b2 = posSet(alice.publicKey, DEMO);
-      await mintLong(b1, L50, [alice]);
-      await mintLong(b2, L50, [alice]);
-      await waitSlots(100); // the first long alone owes > 5e6: shortfall > 2.5 USDC, above the pause floor
+      await mintLong(b1, L10, [alice]);
+      await mintLong(b2, L10, [alice]);
+      await waitSlots(170); // the first long alone owes > 1.7e6: shortfall > 1.2 USDC, above the pause floor
 
       const vault = rangeVaultPda(DEMO);
       let v0 = await amt(vault), me0 = await freeB(me);
@@ -480,14 +475,14 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
 
     after(async () => {
       await unpause();
-      await setRisk(HORIZON, BUFFER);
+      await setPricing(program, me, { rate: TEST_RATE, mult: TEST_MULT, horizon: HORIZON });
     });
   });
 
   describe("force_exercise", () => {
     let bob: Keypair;
     let fx1: P, fx2: P, demo: P;
-    const L = 10_000_000n;
+    const L = 10_000_000n; // ~0.03 USDC of notional on the FX range, ~0.28 on the demo range
     let n9 = 0n;
     /** Our own tag, so unhealthy writes never reach the shared feed. */
     const price = async (o: { mult?: bigint; ageSecs?: number } = {}) => {
@@ -497,7 +492,7 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
     };
 
     before(async () => {
-      bob = await newUser(40_000_000n); // 3 longs × margin 11e6 at the default params
+      bob = await newUser(10_000_000n); // 3 longs × ~1.3 USDC of margin at test pricing
       users.push(bob);
       fx1 = posSet(bob.publicKey, FX);
       fx2 = posSet(bob.publicKey, FX);
@@ -520,9 +515,9 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
     });
 
     it("FX ok: the owner's premium is paid and the caller pays the owner the fee", async () => {
-      const tick = await poolTick();
-      const fee = fxFee(L, FX[0], FX[1], tick);
-      assert.equal(fee, 500_000n, "the frozen pool sits 2 half-widths below the midpoint");
+      // ADR-0006: 0.1 % of the long's notional, whatever the distance.
+      const fee = forceExerciseFee(L, FX[0], FX[1]);
+      assert.isAbove(Number(fee), 1, "a real fee, above the 1 µUSDC floor");
       const vault = rangeVaultPda(FX);
       const v0 = await amt(vault), me0 = await freeB(me), bob0 = await freeB(bob.publicKey);
       const long0 = await totalLong(FX), open0 = (await uc(bob.publicKey)).openLongs;
@@ -565,5 +560,6 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
     for (const s of shorts) await burnShort(s);
     assert.equal(await totalLong(DEMO), 0n, "suite must leave no longs");
     assert.equal(await totalLong(FX), 0n);
+    await setPricing(program, me, { rate: SHIPPED_RATE, mult: SHIPPED_MULT, horizon: SHIPPED_HORIZON });
   });
 });

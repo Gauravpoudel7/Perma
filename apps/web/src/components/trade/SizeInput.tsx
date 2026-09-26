@@ -77,7 +77,10 @@ export function SizeInput() {
   let max: { liquidity: bigint; limit: string } | null = null;
   if (side === "long") {
     const affordable = requiredView
-      ? maxAffordableLiquidity(requiredView.marketRiskFields, requiredView.freeUsdc, requiredView.required)
+      ? maxAffordableLiquidity(requiredView.marketRiskFields, requiredView.freeUsdc, requiredView.required, {
+          tickLower,
+          tickUpper,
+        })
       : null;
     max =
       affordable !== null && affordable < available

@@ -24,6 +24,7 @@ import { WHIRLPOOL, MAX_OPEN_LONGS } from "../lib/constants";
 import { mintPostsFreshPyth, planMintPriceUpdate, readPriceAge, shouldRepost } from "../lib/pythUpdate";
 import { openStepLabels, StalePriceError, type SequenceStep } from "../lib/txSequence";
 import { PERMA_ERROR_COPY } from "../lib/errors";
+import { MIN_RANGE_TICKS } from "../lib/tickMath";
 import { useToastStore } from "../store/useToastStore";
 
 // Demo pool: WSOL (9 decimals) / devUSDC (6 decimals).
@@ -108,6 +109,7 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
   /** True when the fix is a deposit, so the CTA can link to the Vault. */
   let needsDeposit = false;
   if (!canTransact) disabledReason = reason;
+  else if (tickUpper - tickLower < MIN_RANGE_TICKS) disabledReason = PERMA_ERROR_COPY.RangeTooNarrow!;
   else if (!size) disabledReason = "Loading the pool price.";
   else if (size.error) disabledReason = size.error;
   else if (!liquidity || liquidity <= 0n) disabledReason = "Enter an amount.";
@@ -123,7 +125,10 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
     disabledReason = "You've reached the maximum of 8 open longs.";
   else if (side === "long" && requiredView) {
     // `requiredView.required` is the same `requiredFreeUsdc(...)` figure the Vault gate uses.
-    if (!canMintLong(requiredView.freeUsdc, requiredView.required, liquidity, requiredView.marketRiskFields)) {
+    if (!canMintLong(requiredView.freeUsdc, requiredView.required, liquidity, requiredView.marketRiskFields, {
+        tickLower,
+        tickUpper,
+      })) {
       disabledReason = "Your free USDC can't cover this long's required margin.";
       needsDeposit = true;
     }
@@ -269,9 +274,9 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
       usdEstimate: (Number(size.amountA) / 1e9) * price + Number(size.amountB) / 1e6,
       tokenMaxA: caps?.tokenMaxA ?? null,
       tokenMaxB: caps?.tokenMaxB ?? null,
-      requiredMarginUsdc: side === "long" && marketRiskFields ? requiredMargin(marketRiskFields, liquidity) : null,
+      requiredMarginUsdc: side === "long" && marketRiskFields ? requiredMargin(marketRiskFields, liquidity, { tickLower, tickUpper }) : null,
       freeUsdc: side === "long" && userCollateral ? BigInt(userCollateral.balanceB.toString()) : null,
-      premiumPerHourUsdc: side === "long" && marketRiskFields ? estPremiumPerHour(marketRiskFields, liquidity) : null,
+      premiumPerHourUsdc: side === "long" && marketRiskFields ? estPremiumPerHour(marketRiskFields, liquidity, { tickLower, tickUpper }) : null,
       needsRent: !!tickArrayStatus && (!tickArrayStatus.lowerExists || !tickArrayStatus.upperExists),
     };
   }

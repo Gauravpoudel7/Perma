@@ -36,6 +36,7 @@ import {
 } from "@solana/web3.js";
 import { assert, AssertionError } from "chai";
 import { freshPrice } from "./oracle-mock";
+import { testPricing, testSettleCharge } from "./pricing";
 
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const PERMA_WHIRLPOOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -69,9 +70,6 @@ const MAX_A = new BN(1_000_000_000);
 const MAX_B = new BN(100_000_000);
 
 /** Matches `state::premium_defaults` - see 07-premium-engine.md §A. */
-const PREMIUM_RATE = 1_000_000n;
-const PREMIUM_MULTIPLIER = 1_000n;
-const PREMIUM_SCALE = 1_000_000_000_000n;
 
 const startTickIndex = (t: number) =>
   Math.floor(t / (TICK_ARRAY_SIZE * TICK_SPACING)) * (TICK_ARRAY_SIZE * TICK_SPACING);
@@ -87,6 +85,7 @@ describe("settle-premium: the cash path (component 08)", () => {
   const program = anchor.workspace.Perma as Program;
   const conn = provider.connection;
   const me = provider.wallet.publicKey;
+  const pricing = testPricing(program, provider);
 
   const pda = (seeds: (Buffer | Uint8Array)[]) =>
     PublicKey.findProgramAddressSync(seeds, program.programId)[0];
@@ -385,6 +384,7 @@ describe("settle-premium: the cash path (component 08)", () => {
         })
         .rpc();
     }
+    await pricing.enable();
 
     // Top up only what is needed, capped by what the fixtures still hold - the
     // ledger is shared with the other suites and drains across runs.
@@ -500,10 +500,11 @@ describe("settle-premium: the cash path (component 08)", () => {
     assert.isAbove(Number(first), 0);
     assert.isAbove(Number(total), Number(first), "the second settle charged the new period only");
 
-    // What one settle over the whole span would have cost, to the µUSDC.
-    const expected =
-      ((lastSlot - mintSlot) * size * PREMIUM_RATE * PREMIUM_MULTIPLIER) / PREMIUM_SCALE;
-    assert.equal(total.toString(), expected.toString(), "two settles == one settle, exactly");
+    // What one settle over the whole span would have cost. Each accrual rounds
+    // its scaled charge up by < 1e-12 µUSDC (ADR-0006), so two settles can
+    // only exceed one by a whole µUSDC if the one-shot sits on a boundary.
+    const expected = testSettleCharge(lastSlot - mintSlot, size, TICK_LOWER, TICK_UPPER);
+    assert.isTrue(total >= expected && total - expected <= 1n, `two settles ${total} vs one ${expected}`);
 
     await assertEscrowIdentity(demoRange, demoVault, "after a double settle");
     await burnLong(p);
@@ -774,5 +775,6 @@ describe("settle-premium: the cash path (component 08)", () => {
         "suite must leave no longs, or it blocks the harness suite"
       );
     }
+    await pricing.restore();
   });
 });

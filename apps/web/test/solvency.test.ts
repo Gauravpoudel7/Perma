@@ -11,31 +11,58 @@ import {
   canMintLong,
   shortAccruedPremium,
   shortPayableNow,
+  maxAffordableLiquidity,
   type MarketRiskFields,
 } from "../src/lib/solvency";
+import { rangeValueQ64 } from "../src/lib/tickMath";
 
-// Deployed defaults, from state::risk_defaults / state::premium_defaults —
-// see programs/perma/src/state.rs and docs/02-mvp-components/09-risk-solvency.md.
+// Test pricing, identical to `risk.rs`'s unit-test market: the Fair-era
+// per-slot values (now the ceilings). One horizon of premium is then exactly
+// the notional, so margin = ⌈notional⌉ + 1 USDC.
 const DEFAULT_MARKET: MarketRiskFields = {
   longMarginHorizonSlots: 1_000n,
   premiumRate: 1_000_000n,
   premiumMultiplier: 1_000n,
   longMarginBufferUsdc: 1_000_000n,
 };
+// The shipped defaults (state::premium_defaults / risk_defaults, ADR-0006).
+const SHIPPED: MarketRiskFields = {
+  longMarginHorizonSlots: 216_000n,
+  premiumRate: 11_111n,
+  premiumMultiplier: 1n,
+  longMarginBufferUsdc: 1_000_000n,
+};
+const DEMO = { tickLower: -40176, tickUpper: -38168 };
+/** Largest L with at most `usdc` µUSDC of notional on the demo range (`risk.rs` `l_for`). */
+const lFor = (usdc: bigint) => (usdc << 64n) / rangeValueQ64(DEMO.tickLower, DEMO.tickUpper);
+const long = (liquidity: bigint) => ({ accruedScaled: 0n, entryIndex: 0n, liquidity, ...DEMO });
 
 describe("requiredMargin", () => {
-  it("collapses to L + 1 USDC at the deployed defaults (09-risk-solvency.md worked example)", () => {
-    expect(requiredMargin(DEFAULT_MARKET, 50_000_000n)).toBe(51_000_000n);
-    expect(requiredMargin(DEFAULT_MARKET, 1n)).toBe(1_000_001n);
-    expect(requiredMargin(DEFAULT_MARKET, 0n)).toBe(1_000_000n);
+  it("is ⌈notional⌉ + 1 USDC at test pricing (risk.rs margin_at_test_pricing_is_notional_plus_buffer)", () => {
+    expect(requiredMargin(DEFAULT_MARKET, lFor(50_000_000n), DEMO)).toBe(51_000_000n);
+    expect(requiredMargin(DEFAULT_MARKET, 1n, DEMO)).toBe(1_000_001n);
+    expect(requiredMargin(DEFAULT_MARKET, 0n, DEMO)).toBe(1_000_000n);
   });
 
   it("rounds UP, never down, on a non-exact division", () => {
     const m: MarketRiskFields = { ...DEFAULT_MARKET, longMarginHorizonSlots: 1n, longMarginBufferUsdc: 0n };
-    // 1 * 1e6 * L * 1e3 / 1e12 == L / 1e3
-    expect(requiredMargin(m, 1_000n)).toBe(1n); // exact
-    expect(requiredMargin(m, 1_001n)).toBe(2n); // 1.001 -> 2
-    expect(requiredMargin(m, 1n)).toBe(1n); // 0.001 -> 1, never 0
+    expect(requiredMargin(m, lFor(1_000n), DEMO)).toBe(1n);
+    expect(requiredMargin(m, lFor(1_001n), DEMO)).toBe(2n);
+    expect(requiredMargin(m, 1n, DEMO)).toBe(1n); // never 0
+  });
+
+  it("is width-neutral: 50 USDC of notional costs the same margin on 32 and 2048 ticks", () => {
+    const narrow = { tickLower: -39_152, tickUpper: -39_120 };
+    const wide = { tickLower: -40_160, tickUpper: -38_112 };
+    const l = (r: typeof narrow) => (50_000_000n << 64n) / rangeValueQ64(r.tickLower, r.tickUpper);
+    expect(requiredMargin(DEFAULT_MARKET, l(narrow), narrow)).toBe(51_000_000n);
+    expect(requiredMargin(DEFAULT_MARKET, l(wide), wide)).toBe(51_000_000n);
+  });
+
+  it("at the shipped defaults is ≈ 2.4 % of notional + 1 USDC", () => {
+    // 120 USDC of notional: ⌈216_000 × 11_111 × 120e6 / 1e12⌉ = ⌈287_997.1⌉.
+    const m = requiredMargin(SHIPPED, lFor(120_000_000n), DEMO);
+    expect(m).toBe(1_000_000n + 287_998n);
   });
 });
 
@@ -54,16 +81,13 @@ describe("projectedIndex", () => {
 
 describe("payableIfSettledNow", () => {
   it("matches the V1 fixture: 100 slots, L=1e6 -> 100_000 (07-premium-engine.md)", () => {
-    const pos = { accruedScaled: 0n, entryIndex: 0n, liquidity: 1_000_000n };
-    // 100 slots elapsed at rate 1e6: projected = 100 * 1e6
-    const payable = payableIfSettledNow(pos, 100n * 1_000_000n, 1_000n);
-    expect(payable).toBe(100_000n);
+    // 100 slots × 1e-3 × ⌈1 USDC⌉ of notional (risk.rs payable_if_settled_now_does_not_mutate).
+    expect(payableIfSettledNow(long(lFor(1_000_000n)), 100n * 1_000_000n, 1_000n)).toBe(100_000n);
   });
 
   it("rounds up where the on-chain settle would floor-and-carry", () => {
-    const pos = { accruedScaled: 0n, entryIndex: 0n, liquidity: 1_500n };
-    // 1 slot: 1e6 * 1500 * 1e3 / 1e12 == 1.5 -> settle pays 1 (carries 0.5); this ceils to 2.
-    expect(payableIfSettledNow(pos, 1_000_000n, 1_000n)).toBe(2n);
+    // 1 slot: 1e-3 × 1500 == 1.5 -> settle pays 1 (carries 0.5); this ceils to 2.
+    expect(payableIfSettledNow(long(lFor(1_500n)), 1_000_000n, 1_000n)).toBe(2n);
   });
 });
 
@@ -74,8 +98,8 @@ describe("requiredFreeUsdc / gates", () => {
     expect(canWithdraw(1_000n, 700n, 400n)).toBe(false);
   });
 
-  it("matches the worked R3 example: 50e6 long, 100 slots elapsed -> requires 56 USDC", () => {
-    const pos = { accruedScaled: 0n, entryIndex: 0n, liquidity: 50_000_000n };
+  it("matches the worked R3 example: 50 USDC notional, 100 slots elapsed -> requires 56 USDC", () => {
+    const pos = long(lFor(50_000_000n));
     const projected = 100n * DEFAULT_MARKET.premiumRate;
     const required = requiredFreeUsdc(0n, [pos], projected, DEFAULT_MARKET);
     expect(required).toBe(56_000_000n); // 5_000_000 accrued + 51_000_000 margin
@@ -84,8 +108,21 @@ describe("requiredFreeUsdc / gates", () => {
   });
 
   it("R1: a 1 µUSDC user cannot open a 1-unit long", () => {
-    expect(canMintLong(1n, 0n, 1n, DEFAULT_MARKET)).toBe(false);
-    expect(canMintLong(1_000_001n, 0n, 1n, DEFAULT_MARKET)).toBe(true);
+    expect(canMintLong(1n, 0n, 1n, DEFAULT_MARKET, DEMO)).toBe(false);
+    expect(canMintLong(1_000_001n, 0n, 1n, DEFAULT_MARKET, DEMO)).toBe(true);
+  });
+
+  it("maxAffordableLiquidity is the exact edge of canMintLong, on any range", () => {
+    for (const range of [DEMO, { tickLower: -21_272, tickUpper: -21_240 }]) {
+      for (const m of [DEFAULT_MARKET, SHIPPED]) {
+        const free = 11_999_861n;
+        const L = maxAffordableLiquidity(m, free, 0n, range);
+        expect(L > 0n).toBe(true);
+        expect(canMintLong(free, 0n, L, m, range)).toBe(true);
+        expect(canMintLong(free, 0n, L + 1n, m, range)).toBe(false);
+      }
+    }
+    expect(maxAffordableLiquidity(DEFAULT_MARKET, 500_000n, 0n, DEMO)).toBe(0n);
   });
 });
 
@@ -129,14 +166,13 @@ describe("shortPayableNow", () => {
 });
 
 describe("estPremiumPerHour", () => {
-  it("scales the per-slot rate to 9000 slots and floors", () => {
-    // rate 1_000_000 × L 1_000_000 × mult 1_000 × 9000 / 1e12 = 9_000_000 µUSDC
+  it("is 9000 slots of premium on notional, floored", () => {
+    // Test pricing: 1e-3 of notional per slot → 9 × notional per hour.
     const market = { premiumRate: 1_000_000n, premiumMultiplier: 1_000n };
-    expect(estPremiumPerHour(market, 1_000_000n)).toBe(9_000_000n);
-    expect(estPremiumPerHour(market, 0n)).toBe(0n);
-    // 1 unit: 9e12 / 1e12 = 9 exactly; 1/9000 of that floors to 0 — an estimate never rounds up.
-    expect(estPremiumPerHour(market, 1n)).toBe(9n);
-    expect(estPremiumPerHour({ premiumRate: 1n, premiumMultiplier: 1n }, 1n)).toBe(0n);
+    expect(estPremiumPerHour(market, lFor(1_000_000n), DEMO)).toBe(8_999_999n);
+    expect(estPremiumPerHour(market, 0n, DEMO)).toBe(0n);
+    // Shipped: 0.01 % per hour → 120 USDC of notional pays 12_000 µUSDC/h (floor).
+    expect(estPremiumPerHour(SHIPPED, lFor(120_000_000n), DEMO)).toBe(11_999n);
   });
 });
 
@@ -153,8 +189,7 @@ describe("isSettleable", () => {
   it("keeps the floor above zero, so a settleable amount can never be hidden entirely", () => {
     expect(SETTLE_DUST_USDC_MICRO).toBeGreaterThanOrEqual(1n);
     // The floor must stay far below an hour of rent on a real position.
-    expect(SETTLE_DUST_USDC_MICRO).toBeLessThan(
-      estPremiumPerHour({ premiumRate: 1_000_000n, premiumMultiplier: 1_000n }, 1_000_000n)
-    );
+    // 1 SOL (~120 USDC of notional) at the shipped rate pays ~12_000 µUSDC/h.
+    expect(SETTLE_DUST_USDC_MICRO).toBeLessThan(estPremiumPerHour(SHIPPED, lFor(120_000_000n), DEMO));
   });
 });

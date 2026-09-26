@@ -38,20 +38,21 @@ pub mod seeds {
 /// section A and ADR-0002. Tuned for **demo visibility**, not derived from an
 /// options-pricing model - recalibrate before any market with real size.
 pub mod premium_defaults {
-    /// Index units per slot.
-    pub const PREMIUM_RATE: u64 = 1_000_000;
-    /// µUSDC · PREMIUM_SCALE per (liquidity unit × index unit).
-    pub const PREMIUM_MULTIPLIER: u64 = 1_000;
+    /// Index units per slot. With the multiplier, a long pays
+    /// `11_111 × 1 / 1e12` of its notional per slot ≈ 0.01 % per hour
+    /// (ADR-0006).
+    pub const PREMIUM_RATE: u64 = 11_111;
+    /// Scaled µUSDC per (µUSDC of notional × index unit).
+    pub const PREMIUM_MULTIPLIER: u64 = 1;
 }
 
 /// Demo margin parameters (ADR-0003). **Not fair value.**
 ///
-/// With `premium_defaults`, `horizon × rate × mult / PREMIUM_SCALE == 1`, so
-/// `required_margin(L) == L µUSDC + LONG_MARGIN_BUFFER_USDC` exactly — a
-/// coincidence of the demo numbers, called out so nobody mistakes it for a law.
+/// Margin = one horizon of premium on the long's notional plus the buffer:
+/// at these defaults ≈ 2.4 % of notional + 1 USDC (ADR-0006).
 pub mod risk_defaults {
-    /// ~6.7 minutes at 400 ms slots.
-    pub const LONG_MARGIN_HORIZON_SLOTS: u64 = 1_000;
+    /// ~1 day at 400 ms slots (ADR-0006).
+    pub const LONG_MARGIN_HORIZON_SLOTS: u64 = 216_000;
     /// 1 USDC.
     pub const LONG_MARGIN_BUFFER_USDC: u64 = 1_000_000;
 }

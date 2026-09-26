@@ -130,6 +130,7 @@ export function slicesTouchedBy(events: readonly PermaEvent[]): TouchedSlices {
       case "marketPauseSet":
       case "marketPauseCleared":
       case "marketRiskParamsSet":
+      case "marketPremiumParamsSet":
         t.market = true;
         break;
       // Protocol V1 (P1) appended these. Consumer-side support only — no event

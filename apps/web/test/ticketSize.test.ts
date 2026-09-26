@@ -60,14 +60,14 @@ describe("vaultShortfall", () => {
 });
 
 describe("maxAffordableLiquidity", () => {
-  it("is the exact edge of canMintLong at the deployed defaults", () => {
-    const m = { longMarginHorizonSlots: 1000n, premiumRate: 1_000_000n, premiumMultiplier: 1000n, longMarginBufferUsdc: 1_000_000n };
-    const free = 11_999_861n; // the test wallet's vault today
-    const L = maxAffordableLiquidity(m, free, 0n);
-    expect(L).toBe(10_999_861n); // margin(L) = L + 1 USDC at the defaults
-    expect(canMintLong(free, 0n, L, m)).toBe(true);
-    expect(canMintLong(free, 0n, L + 1n, m)).toBe(false);
-    expect(requiredMargin(m, L)).toBe(free);
-    expect(maxAffordableLiquidity(m, 500_000n, 0n)).toBe(0n);
+  it("is the exact edge of canMintLong at the shipped defaults, on the ticket's range", () => {
+    const m = { longMarginHorizonSlots: 216_000n, premiumRate: 11_111n, premiumMultiplier: 1n, longMarginBufferUsdc: 1_000_000n };
+    const range = { tickLower: LO, tickUpper: HI };
+    const free = 11_999_861n; // the test wallet's vault
+    const L = maxAffordableLiquidity(m, free, 0n, range);
+    expect(canMintLong(free, 0n, L, m, range)).toBe(true);
+    expect(canMintLong(free, 0n, L + 1n, m, range)).toBe(false);
+    expect(requiredMargin(m, L, range) <= free).toBe(true);
+    expect(maxAffordableLiquidity(m, 500_000n, 0n, range)).toBe(0n);
   });
 });
