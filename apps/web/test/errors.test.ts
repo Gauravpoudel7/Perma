@@ -134,6 +134,10 @@ describe("OracleStale behind Phantom's generic error", () => {
     expect(nameForCustomCode("custom program error: 0x1788")).toBe("UnexpectedRemainingAccounts"); // 6024
     expect(nameForCustomCode('{"Custom":6040}')).toBe("OracleDeviationTooHigh");
     expect(nameForCustomCode("custom program error: 0x1")).toBeNull(); // SPL Token, not PERMA
+    // P4 codes come from the deployed IDL too.
+    expect(nameForCustomCode('{"Custom":6041}')).toBe("AccountSolvent");
+    expect(nameForCustomCode("custom program error: 0x179a")).toBe("NotExercisable"); // 6042
+    expect(nameForCustomCode("Custom(6043)")).toBe("SelfTarget");
   });
 
   it("names the error from simulation logs when the wallet only says Unexpected error", () => {
