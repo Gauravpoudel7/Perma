@@ -16,6 +16,15 @@ import { Connection, Keypair, PublicKey, Transaction, TransactionInstruction, Co
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { readFileSync } from "fs";
 
+/** Host only: an RPC URL can carry an API key in its path or query. */
+const rpcHost = (u) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return "<rpc>";
+  }
+};
+
 const DISTRIBUTOR = new PublicKey("Bu2AaWnVoveQT47wP4obpmmZUwK9bN9ah4w6Vaoa93Y9");
 const DISTRIBUTOR_PDA = new PublicKey("3pgfe1L6jcq59uy3LZmmeSCk9mwVvHXjn21nSvNr8D6x");
 const DEVTOKEN_ADMIN = new PublicKey("3otH3AHWqkqgSVfKFkrxyDqd2vK6LcaqigHrFEmWcGuo");
@@ -33,7 +42,7 @@ const opt = (name, dflt) => {
 };
 
 const url = process.env.SOLANA_RPC ?? process.env.ANCHOR_PROVIDER_URL ?? "https://api.devnet.solana.com";
-if (/mainnet/i.test(url)) throw new Error(`faucet: refusing mainnet RPC ${url}`);
+if (/mainnet/i.test(url)) throw new Error(`faucet: refusing mainnet RPC ${rpcHost(url)}`);
 const conn = new Connection(url, "confirmed");
 const genesis = await conn.getGenesisHash();
 if (genesis !== DEVNET_GENESIS) throw new Error(`faucet: cluster genesis ${genesis} is not Solana-devnet`);

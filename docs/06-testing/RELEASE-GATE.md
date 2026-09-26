@@ -22,12 +22,16 @@
 
 The devnet program runs P3 (ELF **604,992 B**, slot **502908043**). The allowlisted pool `2WUg…` was swapped back to Pyth SOL/USD (~$117) and is within the 200 bps band. `yarn smoke-devnet-p3 --smoke` is green: Hermes post, deposit, mint short, mint long, close the Pyth accounts, then settle, close long, close short. The web client asks for **one** wallet approval for the three Pyth transactions and refuses a Hermes update older than 30 s before it sends anything. Web `yarn test` **113**. Ticket: [`P3-DEVNET-POOL-PRICE.md`](../audits/P3-DEVNET-POOL-PRICE.md).
 
-## Protocol V1 P5 (value-based premium, ADR-0006) — **PASSED on localnet** (2026-09-26); Solana-devnet upgrade pending
+## Protocol V1 P5 (value-based premium, ADR-0006) — **PASSED on localnet and Solana-devnet** (2026-09-26)
 
 Premium and margin are priced on notional `L·v` (`v = √P_upper − √P_lower`, Orca's tick table ported into `tick_math.rs`) at 0.01 % per hour, with a 1-day margin horizon, a 32-tick minimum range width, and a force-exercise fee of 0.1 % of notional ([ADR-0006](../adr/ADR-0006-value-based-premium.md), Accepted).
 - **Localnet, fresh ledger: 138 passing / 0 failing.** That is 133 from before plus 5 in the new `tests/value-pricing.ts`. Suites that need accrual within seconds switch to test pricing through `tests/pricing.ts` and restore the shipped values.
 - **Unit: 92.**
-- **Web:** `yarn test` **161**; typecheck, lint, check-copy and build pass.
+- **Web:** `yarn test` **163**; typecheck, lint, check-copy and build pass.
+- **Solana-devnet runs P5:** ELF **672,720 B**, sha256 `54dbf7ad25b5a068…`, slot **504467096**, upgrade `3eEzG5MitMYKCrQzJtPsYjEmZ6RWPjAZfgpSsuRtf7HvZeK5wuuXWrdTUcCH7Z6JiBgv1V5U21To7uX7p6Snhig5`. The live dump is byte-identical to the build.
+- **Rollout sequence:** pause → deploy → `set-premium-params 11111 1` → `set-risk-params 216000 1000000` → unpause. The market reads back rate 11,111, mult 1, horizon 216,000, buffer 1,000,000, unpaused.
+- **Smoke** (`yarn smoke-devnet-p3 --smoke`, now sized by notional: a 60 USDC short and a 50 USDC long on a 128-tick range): deposit, mint short, mint long, settle, close long, close short all succeed. The long paid **96 µUSDC over 174 slots**, and the ticket's own estimate for those slots is 96.6 µUSDC.
+- **Client fix found by the smoke:** short slippage caps are now Orca's exact integer deposit amounts at the pool's √price (`liquidityMath.exactDepositAmounts`). The float estimate at the whole tick under-counted USDC by more than 1 % on narrow ranges, and Orca refused it with `TokenMaxExceeded`.
 
 ## Protocol V1 P4 (liquidation + force exercise) — **PASSED on localnet and Solana-devnet** (2026-09-26)
 

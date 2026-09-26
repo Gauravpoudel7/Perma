@@ -23,6 +23,15 @@ import { WHIRLPOOL } from "../src/lib/constants";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 
+/** Host only: an RPC URL can carry an API key in its path or query. */
+const rpcHost = (u: string) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return "<rpc>";
+  }
+};
+
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "http://127.0.0.1:8899";
 const connection = new Connection(RPC_URL, "confirmed");
 const secret = Uint8Array.from(JSON.parse(readFileSync(`${homedir()}/.config/solana/id.json`, "utf8")));
@@ -53,7 +62,7 @@ async function main() {
       `${label}: admin=${cfg.admin.toBase58()} isPaused=${m.isPaused} horizon=${m.longMarginHorizonSlots.toString()} buffer=${m.longMarginBufferUsdc.toString()} rate=${m.premiumRate.toString()} mult=${m.premiumMultiplier.toString()}`
     );
   };
-  console.log(`RPC: ${RPC_URL}\nAdmin: ${admin.publicKey.toBase58()}\nMarket: ${market.toBase58()}`);
+  console.log(`RPC: ${rpcHost(RPC_URL)}\nAdmin: ${admin.publicKey.toBase58()}\nMarket: ${market.toBase58()}`);
   await show("before");
 
   const accounts = { admin: admin.publicKey, market };

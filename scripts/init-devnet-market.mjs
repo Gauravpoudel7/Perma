@@ -22,6 +22,15 @@ import {
 } from "@solana/spl-token";
 import { readFileSync } from "fs";
 
+/** Host only: an RPC URL can carry an API key in its path or query. */
+const rpcHost = (u) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return "<rpc>";
+  }
+};
+
 const { AnchorProvider, Program, Wallet, web3 } = anchor;
 
 /** The allowlisted pool: SOL/devUSDC, tick_spacing 8. Same id on localnet (cloned) and devnet. */
@@ -55,7 +64,7 @@ const globalConfig = pda([Buffer.from("global_config")]);
 const market = pda([Buffer.from("market"), POOL.toBuffer()]);
 const marketAuthority = pda([Buffer.from("market_authority"), market.toBuffer()]);
 
-console.log(`cluster        ${url}`);
+console.log(`cluster        ${rpcHost(url)}`);
 console.log(`admin          ${kp.publicKey.toBase58()}`);
 console.log(`program        ${program.programId.toBase58()}`);
 

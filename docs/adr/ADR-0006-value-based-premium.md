@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Status | **Accepted** (2026-09-26), with the owner's answers to Q1–Q5 below. Built on branch `p5`; Solana-devnet upgrade pending an explicit "GO upgrade". |
+| Status | **Accepted** (2026-09-26), with the owner's answers to Q1–Q5 below. Built on branch `p5`. **Live on Solana-devnet** since slot 504467096 (upgrade `3eEzG5Mi…`, sha256 `54dbf7ad…`), with the market set to 11,111 × 1 and a 216,000-slot horizon. |
 | Supersedes | The open question in [`OPEN-QUESTION-premium-per-liquidity.md`](OPEN-QUESTION-premium-per-liquidity.md) |
 | Touches | `tick_math.rs` (new), `premium.rs`, `risk.rs`, `lib.rs` (`set_premium_params`, the 32-tick minimum), `errors.rs`, `state.rs` defaults; `apps/web/src/lib/tickMath.ts` (new), `solvency.ts`, the trade ticket; `tests/pricing.ts`, `tests/value-pricing.ts` (new) |
 | Related | [ADR-0002](ADR-0002-premium-accounting.md) (premium accounting), [ADR-0003](ADR-0003-fair-mvp-risk-model.md) (margin), [ADR-0004](ADR-0004-oracle-and-price-aware-risk.md) (no price on exit paths), [ADR-0005](ADR-0005-force-exercise-and-liquidation.md) (maintenance, force-exercise fee) |

@@ -17,6 +17,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 
+/** Host only: an RPC URL can carry an API key in its path or query. */
+const rpcHost = (u) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return "<rpc>";
+  }
+};
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PROGRAM_ID = new PublicKey("4qhBfpjfLUSgaSBNEM9aBQw9FbN2QysqLUgkUtM6HDdt");
 const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
@@ -35,7 +44,7 @@ function fail(message) {
   process.exit(1);
 }
 
-if (/mainnet/i.test(url)) fail(`upgrade-devnet-p3: refusing mainnet RPC ${url}`);
+if (/mainnet/i.test(url)) fail(`upgrade-devnet-p3: refusing mainnet RPC ${rpcHost(url)}`);
 
 const conn = new Connection(url, "confirmed");
 const genesis = await conn.getGenesisHash();
@@ -59,7 +68,7 @@ const elfLen = data.length - HEADER;
 
 const soBytes = existsSync(SO_PATH) ? statSync(SO_PATH).size : null;
 console.log("Prototype. Not audited. Single pool. Not production mainnet risk capital.");
-console.log(`cluster      ${url}`);
+console.log(`cluster      ${rpcHost(url)}`);
 console.log(`program      ${PROGRAM_ID.toBase58()}`);
 console.log(`  data       ${dataPk.toBase58()}`);
 console.log(`  elf        ${elfLen} bytes`);
@@ -87,7 +96,7 @@ const deployCmd = [
   "solana program deploy target/deploy/perma.so",
   `--program-id ${KEYPAIR_PATH}`,
   `--upgrade-authority ${walletPath}`,
-  `-u ${url}`,
+  `-u "$SOLANA_RPC"`,
 ].join(" \\\n  ");
 console.log("\nMac deploy (only after measure is WITHIN 200 bps and anchor build --arch v0):");
 console.log(deployCmd);

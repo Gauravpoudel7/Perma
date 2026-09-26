@@ -12,6 +12,15 @@ import { createHash } from "crypto";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 
+/** Host only: an RPC URL can carry an API key in its path or query. */
+const rpcHost = (u) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return "<rpc>";
+  }
+};
+
 const RECEIVER = new PublicKey("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
 const FEED = Buffer.from("ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", "hex");
 const POOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
@@ -47,7 +56,7 @@ export async function postFreshPrice(conn, payer) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const url = process.env.ANCHOR_PROVIDER_URL ?? "http://127.0.0.1:8899";
-  if (!/127\.0\.0\.1|localhost/.test(url)) throw new Error(`mock-price: refusing non-local RPC ${url}`);
+  if (!/127\.0\.0\.1|localhost/.test(url)) throw new Error(`mock-price: refusing non-local RPC ${rpcHost(url)}`);
   const wallet = (process.env.ANCHOR_WALLET ?? "~/.config/solana/id.json").replace("~", process.env.HOME);
   const payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(wallet, "utf8"))));
   const conn = new Connection(url, "confirmed");

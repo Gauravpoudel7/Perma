@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cleanAmountInput, ticketSize, vaultShortfall } from "../src/lib/ticketSize";
-import { amountsForLiquidity, slippageCappedTokenMax } from "../src/lib/liquidityMath";
+import { amountsForLiquidity, exactDepositAmounts, slippageCappedTokenMax } from "../src/lib/liquidityMath";
+import { sqrtPriceX64 } from "../src/lib/tickMath";
 import { parseToBaseUnits } from "../src/lib/format";
 import { canMintLong, maxAffordableLiquidity, requiredMargin } from "../src/lib/solvency";
 
@@ -52,7 +53,7 @@ describe("cleanAmountInput and parseToBaseUnits", () => {
 
 describe("vaultShortfall", () => {
   it("names exactly what the vault is missing for a short's caps", () => {
-    const caps = slippageCappedTokenMax(1_000_000_000_000n, -21449, LO, HI);
+    const caps = slippageCappedTokenMax(1_000_000_000_000n, sqrtPriceX64(-21449), LO, HI);
     expect(vaultShortfall(caps, { a: caps.tokenMaxA, b: caps.tokenMaxB })).toBeNull();
     expect(vaultShortfall(caps, { a: 0n, b: caps.tokenMaxB })).toMatch(/^Your vault needs [\d.]+ SOL more for this short\.$/);
     expect(vaultShortfall(caps, { a: 0n, b: 0n })).toMatch(/SOL and [\d.]+ USDC more/);
@@ -69,5 +70,27 @@ describe("maxAffordableLiquidity", () => {
     expect(canMintLong(free, 0n, L + 1n, m, range)).toBe(false);
     expect(requiredMargin(m, L, range) <= free).toBe(true);
     expect(maxAffordableLiquidity(m, 500_000n, 0n, range)).toBe(0n);
+  });
+});
+
+describe("slippageCappedTokenMax (exact Orca amounts)", () => {
+  it("covers the devnet smoke case a whole-tick float missed: spot mid-tick, 66 ticks above the lower edge", () => {
+    // Pool state from the failed 2026-09-26 smoke: sqrt_price 6389718839298531340 (tick -21206), range [-21272, -21144).
+    const sqrtP = 6_389_718_839_298_531_340n;
+    const L = 27_070_426_171n;
+    const exact = exactDepositAmounts(L, sqrtP, -21272, -21144);
+    const float = amountsForLiquidity(Number(L), -21206, -21272, -21144);
+    // The float at the tick floor under-counts USDC by more than 1 %...
+    expect(Number(exact.amountB) / float.amountB).toBeGreaterThan(1.01);
+    // ...and the caps now cover Orca's exact need, plus 1 %.
+    const caps = slippageCappedTokenMax(L, sqrtP, -21272, -21144);
+    expect(caps.tokenMaxA >= exact.amountA && caps.tokenMaxB >= exact.amountB).toBe(true);
+    expect(caps.tokenMaxB).toBe((exact.amountB * 10_100n + 9_999n) / 10_000n);
+  });
+
+  it("one-sided ranges need only one token", () => {
+    const sqrtP = sqrtPriceX64(-21206);
+    expect(exactDepositAmounts(1_000_000n, sqrtP, -21000, -20872).amountB).toBe(0n); // above spot: SOL only
+    expect(exactDepositAmounts(1_000_000n, sqrtP, -21400, -21272).amountA).toBe(0n); // below spot: USDC only
   });
 });

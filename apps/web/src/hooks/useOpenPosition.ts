@@ -88,8 +88,8 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
   const liquidity = size?.liquidity ?? null;
   const tickCurrent = spot?.tickCurrentIndex ?? null;
   const caps =
-    side === "short" && liquidity && tickCurrent !== null
-      ? slippageCappedTokenMax(liquidity, tickCurrent, tickLower, tickUpper)
+    side === "short" && liquidity && spot
+      ? slippageCappedTokenMax(liquidity, spot.sqrtPriceX64, tickLower, tickUpper)
       : null;
 
   const available = rangeState
@@ -151,7 +151,8 @@ export function useOpenPosition(tickArrayStatus: TickArrayStatus | null) {
     if (side === "short") {
       const positionMint = Keypair.generate();
       const orcaAccounts = resolveMintShortOrcaAccounts(market, marketAuthority, tickLower, tickUpper, positionMint.publicKey);
-      const { tokenMaxA, tokenMaxB } = slippageCappedTokenMax(liquidity, tickCurrent, tickLower, tickUpper);
+      if (!spot) return [];
+      const { tokenMaxA, tokenMaxB } = slippageCappedTokenMax(liquidity, spot.sqrtPriceX64, tickLower, tickUpper);
       const ix = await buildMintPositionIx(
         program,
         {

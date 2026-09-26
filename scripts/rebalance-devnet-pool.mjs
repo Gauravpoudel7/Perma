@@ -24,6 +24,15 @@ import { Connection, Keypair, PublicKey, Transaction, TransactionInstruction, Co
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { readFileSync } from "fs";
 
+/** Host only: an RPC URL can carry an API key in its path or query. */
+const rpcHost = (u) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return "<rpc>";
+  }
+};
+
 const POOL = new PublicKey("2WUgXbAmhquXMLhqqUthztDaVYnG8Mmp57CkXNb5ym9G");
 const WHIRLPOOL_PROGRAM = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const WSOL = new PublicKey("So11111111111111111111111111111111111111112");
@@ -50,7 +59,7 @@ const opt = (name, dflt) => {
 };
 
 const url = process.env.SOLANA_RPC ?? process.env.ANCHOR_PROVIDER_URL ?? "https://api.devnet.solana.com";
-if (/mainnet/i.test(url)) throw new Error(`rebalance: refusing mainnet RPC ${url}`);
+if (/mainnet/i.test(url)) throw new Error(`rebalance: refusing mainnet RPC ${rpcHost(url)}`);
 const conn = new Connection(url, "confirmed");
 const genesis = await conn.getGenesisHash();
 if (genesis !== DEVNET_GENESIS) throw new Error(`rebalance: cluster genesis ${genesis} is not Solana-devnet`);
@@ -200,7 +209,7 @@ async function measure(quiet = false) {
     throw new Error(`rebalance: decode mismatch, sqrt_price implies tick ${tickOf(pool.sqrt)} but pool says ${pool.tick}`);
   }
   if (!quiet) {
-    console.log(`cluster      ${url}`);
+    console.log(`cluster      ${rpcHost(url)}`);
     console.log(`pool         ${POOL.toBase58()}`);
     console.log(`  tick       ${pool.tick}`);
     console.log(`  sqrt_price ${pool.sqrtX64}`);
