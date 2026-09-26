@@ -217,6 +217,37 @@ The cloned pool's spot cannot be moved on localnet, so every gap is created on t
 
 Every rejected vector also asserts the `perma_position` PDA was not created.
 
+## 8. Liquidation + Force-Exercise Vectors — P4 ([ADR-0005](../adr/ADR-0005-force-exercise-and-liquidation.md))
+
+These use the §0 parameters and the demo risk defaults: `required_margin(L) = L + 1_000_000`. The ADR-0005 §3 constants are the only other inputs: `MAINT_MARGIN_BPS = 7_500`, `FX_BAND_TICKS = 300`, `FX_FEE_BASE_SLOTS = 100`, `FX_FEE_MAX_HALVINGS = 10`.
+
+### Liquidation (one long, `L = 50_000_000`, 50 000 µUSDC accrued per slot)
+
+`maint = accrued + ⌈0.75 × 51_000_000⌉ = accrued + 38_250_000`. Bonus = `min(R / 2, D, 38_250_000)`, where `D = maint − free` and `R = free − paid`.
+
+| Case | Free before | Accrued | `maint` | Result | Premium paid | Bonus | Owner free after | Shortfall |
+|---|---|---|---|---|---|---|---|---|
+| L1 `LIQ_SOLVENT_REJECT` | `40_000_000` | `0` | `38_250_000` | **`AccountSolvent`** | — | — | `40_000_000` | — |
+| L2 `LIQ_INSOLVENT_OK` | `40_000_000` | `5_000_000` (100 slots) | `43_250_000` | closed | `5_000_000` | `3_250_000` | `31_750_000` | `0` |
+| L3 bonus capped by R/2 | `6_000_000` | `5_000_000` | `43_250_000` | closed | `5_000_000` | `500_000` | `500_000` | `0` |
+| L4 `LIQ_PAUSE_INTERACTION` (shortfall) | `1_000_000` | `5_000_000` | `43_250_000` | closed, **market paused** | `1_000_000` | `0` | `0` | `4_000_000` |
+
+The boundary is `free == maint`, which is solvent (`AccountSolvent`). One µUSDC less is liquidatable.
+
+### Force-exercise fee (`base = ⌈L / 10⌉` at the defaults)
+
+Demo range `[-40176, -38168)`: `hw = 1004`, `mid = -39172`, eligible when `tick ≥ -37868` or `tick < -40476`.
+
+| Case | `L` | Tick | `n = max(1, \|tick − mid\| / hw)` | Fee (µUSDC) |
+|---|---|---|---|---|
+| `FX_IN_RANGE_REJECT` | any | `-38168` … `-37869` (inside band) | — | **`NotExercisable`** |
+| `FX_NEAR_RANGE_FEE` | `50_000_000` | `-37868` | `1` | `5_000_000` |
+| `FX_FAR_RANGE_FEE` | `50_000_000` | `-34152` | `5` | `312_500` |
+| halving floor | `50_000_000` | `-20000` | `19` → capped at 10 halvings | `4_882` |
+| minimum fee | `1` | `-37868` | `1` | `1` (floor) |
+
+Unit tests: `programs/perma/src/risk.rs` (`p4_…`). Integration: `tests/liquidation.ts`, `tests/force-exercise.ts`.
+
 ---
 
 **🚩 STATUS:** Prototype. Not audited. Single pool. Not production mainnet risk capital.

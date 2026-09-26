@@ -2,128 +2,183 @@
 
 > Prototype. Not audited. Single pool. Not production mainnet risk capital.
 
-**Date**: 2026-09-25
-**Status**: **Proposed.** No `liquidate_*` or `force_*` code, and no liquidation-distance UI, until this is Accepted with every row of §Open questions answered.
-**Decider(s)**: product owner (open questions), PERMA engineering (structure)
-**Builds on**: [ADR-0003](ADR-0003-fair-mvp-risk-model.md) (premium-horizon solvency), [ADR-0004](ADR-0004-oracle-and-price-aware-risk.md) (reference price, conservative selection, §Forward)
+**Date**: 2026-09-25 (Proposed), 2026-09-26 (Accepted)
+**Status**: **Accepted.** The product owner asked for the engineering recommendations on Q1–Q6 after a Panoptic review (2026-09-26); they are recorded under §Decisions.
+**Decider(s)**: product owner (the choice to take the recommendations), PERMA engineering (structure and numbers)
+**Builds on**: [ADR-0003](ADR-0003-fair-mvp-risk-model.md) (premium-horizon solvency), [ADR-0004](ADR-0004-oracle-and-price-aware-risk.md) (reference price, §Forward)
 **Problem statement**: [`LIQUIDATION-AND-FORCE-EXERCISE.md`](../09-post-mvp/LIQUIDATION-AND-FORCE-EXERCISE.md), `PRD.md` B20/B21/B30. Feasibility: [`IMPL-P4-FEASIBILITY.md`](../audits/IMPL-P4-FEASIBILITY.md).
 
 ### Context
 
-Today only a long can owe anything. It owes premium, which accrues with time, and solvency is checked only when free USDC leaves: at withdraw and at mint-long (`risk.rs:165`, `:195`). A long whose owner stops paying stays `Open`. Its burn fails rather than closing into a debt (`lib.rs:1916`). It also pins the shorts under it, because a short may not burn below `total_long_liquidity` (`lib.rs:990-993`). Nobody but the owner can close it (`lib.rs:2464-2480`).
+Only a long can owe anything today. It owes premium, which accrues with time, and solvency is checked only when free USDC leaves: at withdraw and at mint-long (`risk.rs:165`, `:195`).
+
+- A long whose owner stops paying stays `Open`, because its burn fails rather than closing into a debt (`lib.rs:1916`).
+- It also pins the shorts under it: a short may not burn below `total_long_liquidity` (`lib.rs:990-993`).
+- Nobody but the owner can close it (`lib.rs:2464-2480`).
 
 P4 adds two third-party closes for a **long**:
 
-- **Liquidation** handles *account solvency*. The owner's free USDC no longer covers what their longs owe.
-- **Force exercise** handles *seller liveness*. The long's range is out of the money, so it pins inventory while paying premium on liquidity nobody uses.
+- **Liquidation** is about account solvency.
+- **Force exercise** is about seller liveness.
 
-Shorts are never liquidated. A short owes nothing, and its collateral is its own locked tokens (feasibility Q0 #1).
+Shorts are never liquidated: a short owes nothing, and its collateral is its own locked tokens.
 
-### Decision (proposed)
+### Panoptic reference (behaviour only — BUSL code, nothing copied)
+
+Sources are Panoptic's public docs and the Code4rena audit repos (2024-09 and 2025-12). Only the *mechanism* is borrowed.
+
+| Topic | Panoptic v1.x | PERMA P4 |
+|---|---|---|
+| Insolvent when | Collateral value < requirement at `NO_BUFFER` (100%). Mints and withdraws need `BP_DECREASE_BUFFER` (133.33%), so initial = 4/3 × maintenance. | Same shape: maintenance = **75 %** of the initial margin (§1). |
+| Price for liquidation | Must be insolvent at *all* of fast oracle, 10-min TWAP, last observed and current tick. Reverts `StaleTWAP` if \|current − TWAP\| > 513 ticks (~5 %). | **No price at all.** PERMA solvency is premium over time (ADR-0003), so spot manipulation cannot make an account liquidatable. |
+| Scope per call | Burns *every* position of the account (≤ 32) in one call. | **One long per call** (1232-byte tx; longs span ranges). Re-checked every call, so it is a partial liquidation that stops once the account is healthy. |
+| Bonus | `min(balance / 2, requirement − balance)` at TWAP. | `min(free_after_premium / 2, shortfall, m × margin of the closed long)` (§1). The last term is new: it stops a split liquidation from out-earning a single one. |
+| Bad debt | Premium the liquidatee paid is haircut; the remaining loss is absorbed by the pool's LPs (socialized). | **Never socialized** (PRD B30). A shortfall closes the long, auto-pauses the market, and the shorts keep the unpaid part as their existing `premium_receivable` carry (§4). |
+| Force exercise eligible | At least one long leg with the TWAP outside its range. | The long's range is out of range by a margin that guarantees the *Pyth* price is outside it too (§2). |
+| Force fee | `FORCE_EXERCISE_COST >> (n − 1)`, where `n` = half-widths between price and strike (max over legs, floor 1). Docs: ~1.024 % near, 0.01 % far. Paid by the exercisor to the exercisee. | Same halving schedule, and the same payer and payee. The base is premium-denominated, because a PERMA long has no token notional (§2). |
+| Exercisor | Anyone. Must be solvent afterwards (133 % buffer). | Anyone with a PERMA account in the market. Must pass the existing withdraw solvency gate for the fee (§2). |
+| Who liquidates | Anyone; bots are encouraged. | Anyone (Q5). |
+
+### Decision
 
 #### 1. Liquidation — `liquidate_long`
 
-- **Unit.** One long per instruction. The caller passes the target long, the owner's `UserCollateral`, and the owner's **full** open-long list, validated by the existing `risk::collect_open_longs` (`risk.rs:230`). Eligibility is a whole-account fact and is re-checked on every call, so a partial run can never close a long of a solvent account.
-- **Eligibility.** `free_usdc < premium_owed_usdc + Σ payable_if_settled_now + m × Σ required_margin`, where `m` is the maintenance factor (Q2). The initial requirement, enforced at mint, stays at `m = 1`. With `m = 0` an account becomes liquidatable only once it is already unpayable, and then there is nothing left to pay a bonus with, so `0 < m < 1` is expected.
+- **Accounts.**
+  - The signer is the liquidator, with their own `UserCollateral` in this market.
+  - The target is a long plus its owner's `UserCollateral`, `RangePremiumState`, range vault, and premium index.
+  - Remaining accounts: the owner's **full** open-long list, validated by the existing `risk::collect_open_longs` (`risk.rs:230`). The target must be in that list.
+- **Maintenance requirement.** `maint = premium_owed_usdc + Σ payable_if_settled_now + ⌈Σ required_margin × MAINT_MARGIN_BPS / 10_000⌉`, with **`MAINT_MARGIN_BPS = 7_500`**. Owed premium always counts in full; only the forward margin is discounted. The initial requirement at mint and withdraw is unchanged (100 % of margin), so the ratio of initial to maintenance margin is Panoptic's 4/3.
+- **Eligible** when `free_usdc < maint`. Otherwise it fails with `AccountSolvent` and nothing moves.
 - **Effect, in order:**
-  1. Poke the index and range (same prefix as burn).
-  2. Pay `min(payable, free_usdc)` to the range vault (the `settle_long_cash` path).
-  3. Pay the bonus to the liquidator, capped per §3.
-  4. `position::close_long`, then decrement `total_long_liquidity`.
-  5. Close the position account, with rent to the owner.
-- **Shortfall** (`payable > free_usdc`). The long still closes, which stops further accrual. The unpaid part is **bad debt**, handled per §4.
+  1. Poke the index and the range, as the burn prefix does.
+  2. Accrue the target long.
+  3. Pay its premium: `paid = min(payable, free_usdc)`, a real transfer from `vault_b` to the range vault via `apply_long_payment`.
+  4. If `paid == payable`, the bonus is `min(R / 2, D, ⌈m × required_margin(target)⌉)`:
+     - `R` is the free USDC left after step 3.
+     - `D = maint − free_usdc`, measured before step 3.
+     - `m` is `MAINT_MARGIN_BPS / 10_000`, so the third term is the maintenance margin the close releases.
+
+     The bonus is credited from the owner's free USDC to the liquidator's free USDC. It is an internal ledger move; no token moves.
+  5. If `paid < payable`, there is a **shortfall**: no bonus, and §4 applies.
+  6. `position::close_long`, decrement `total_long_liquidity`, and close the account with rent to the owner.
+- **Why the three-way bonus cap.** Each call can release at most `m × margin` of maintenance, so the bonus never exceeds what the close frees. The shortfall therefore never grows between calls, and the total bonus over any split is at most the sum of the released maintenance margins.
 
 #### 2. Force exercise — `force_exercise`
 
-- **Eligibility.** The long's whole range `[tick_lower, tick_upper)` is out of range by the **reference price**, not by spot:
-  - above the range: `price − conf > price(tick_upper)`
-  - below the range: `price + conf < price(tick_lower)`
+- **Accounts.**
+  - The signer is the exercisor, with their own `UserCollateral` in this market.
+  - The target is a long plus its owner's `UserCollateral`, range state, range vault, and premium index.
+  - Also the `whirlpool` and a Pyth `price_update`.
+  - Remaining accounts: the **exercisor's** full open-long list, for the fee gate.
+- **Eligible** when both of these hold:
+  - The pool tick is at least **`FX_BAND_TICKS = 300`** ticks outside the long's range: `tick ≥ tick_upper + 300` or `tick + 300 < tick_lower`.
+  - `oracle::check_price` passes with **`FX_MAX_STALENESS_SECS = 30`**, plus the unchanged 100 bps confidence and 200 bps deviation limits.
 
-  These are the ADR-0004 conservative rules, applied in the direction that makes eligibility harder. The pool spot must also pass `oracle::check_price` in the same instruction and sit on the same side. **Never a single spot tick.**
-- **Precondition.** The target account is solvent under §1. If it is not, the call fails, and liquidation goes first (§5).
-- **Effect.**
-  1. Settle the long's premium in full.
-  2. The exercisor pays the force fee (§3) to the exercisee as an internal free-USDC ledger move. No new tokens are minted.
-  3. `close_long`, then decrement `total_long_liquidity`.
+  Together these put the reference price outside the range even at `price ± conf`, because 1.0001^300 ≈ 3.05 % ≥ (1.02 × 1.01 − 1) ≈ 3.02 %. Moving spot alone cannot trigger an exercise, and a single spot tick is never trusted. Otherwise it fails with `NotExercisable`.
+- **The exercisor may not be the owner** (`SelfExercise`): the owner can simply burn.
+- **Effect, in order:**
+  1. Poke the index and the range.
+  2. Accrue the target long and pay its premium **in full** (the `pay_long_premium_cash` path). An owner who cannot pay fails `InsufficientCollateralForLoss`, which routes the case to liquidation first (§5).
+  3. The fee moves from the exercisor's free USDC to the owner's free USDC, as an internal ledger move. It is gated by `risk::check_withdraw_allowed(exercisor, longs, …, 0, fee)`, the same gate a withdraw of `fee` would face.
+  4. `close_long`, decrement `total_long_liquidity`, and close the account with rent to the owner.
+- **Fee.**
+  - `base = required_margin_with(FX_FEE_BASE_SLOTS, rate, mult, 0, L)`: the premium the long would pay over **`FX_FEE_BASE_SLOTS = 100`** slots, rounded up. That is 10 % of the 1000-slot margin horizon, mirroring Panoptic's ~1.024 % fee against a 10 % buyer collateral.
+  - `hw = max(1, (tick_upper − tick_lower) / 2)`, `mid = tick_lower + hw`, and `n = max(1, |tick − mid| / hw)`.
+  - **`fee = max(1, base >> min(n − 1, FX_FEE_MAX_HALVINGS))`**, with **`FX_FEE_MAX_HALVINGS = 10`** (Panoptic's 1024 → 1 floor).
+- **The long's P&L stays 0.** There is still no counterparty for intrinsic value (ADR-0004). "Exercise" is a close at no intrinsic payout, and the fee is the owner's compensation.
 
-  The long's P&L stays 0: there is still no counterparty for intrinsic value (ADR-0004 migration map). "Exercise" here means the long is closed at no intrinsic payout, and the fee is its compensation.
+#### 3. Numbers (the only place they are set; fixtures in `FIXTURES-AND-VECTORS.md` §8)
 
-#### 3. Bonus and fee structure (numbers in §Open questions)
+| Constant | Value | Where |
+|---|---|---|
+| `MAINT_MARGIN_BPS` | 7_500 | `risk.rs` |
+| `FX_BAND_TICKS` | 300 | `oracle.rs` |
+| `FX_MAX_STALENESS_SECS` | 30 | `oracle.rs` |
+| `FX_FEE_BASE_SLOTS` | 100 | `risk.rs` |
+| `FX_FEE_MAX_HALVINGS` | 10 | `risk.rs` |
 
-- **Liquidation bonus.** A share of the target account's remaining free USDC *after* premium is paid, with a hard cap per account, not per call. Splitting a liquidation into more calls must not earn more. It is paid as an internal credit to the liquidator's `UserCollateral` in this market; the liquidator withdraws it normally. The bonus is never paid when there is a shortfall.
-- **Force fee.** Paid by the exercisor to the exercisee. It decreases with distance from the range (larger near the boundary, smaller far out of the money), and it is a pure function of `(reference price, tick_lower, tick_upper)` so it can be frozen as fixtures.
+These are demo values. Change them only by amending this ADR. They are constants rather than `Market` fields: YAGNI until a second market needs different ones.
 
 #### 4. Pause and bad debt
 
-- Both instructions are **risk-reducing exits**, so, like withdraw, settle, and burn today, they do not check `is_paused` (`lib.rs` checks only deposit, lock, mint, and the harness: `:407/:545/:615/:1047/:1189`). Proposed so that an admin pause cannot trap an insolvent account in accrual (Q6).
-- **Bad debt is never socialized silently** (PRD B30). A shortfall liquidation:
+- Both instructions reduce risk, so they are **allowed while paused**, as withdraw, settle and burn are today (Q6). A pause therefore cannot trap an insolvent account in accrual.
+- A **shortfall** liquidation:
   - sets `market.is_paused = true` in the same instruction
-  - emits the shortfall
-  - leaves the range's shorts holding the unpaid part as their existing `premium_receivable` carry
+  - emits `shortfall > 0`
+  - leaves the range's shorts holding the unpaid part as `premium_receivable` carry
 
-  An admin runs the documented incident path (pause → assess → public note → remediation) before unpausing.
+  An admin then follows PRD B30 (pause → assess → public note → remediation) before `unpause_market`. There is no haircut and no socialization.
 
 #### 5. Ordering when both apply
 
-**Liquidation first.** Force exercise on an insolvent account is refused (`TargetInsolvent`). A fee credited into an account that is simultaneously being liquidated would muddle both the bonus cap and the shortfall figure.
+**Liquidation first.** Force exercise pays the target's premium in full or fails, so an owner who cannot pay can only be liquidated. No extra check is needed.
 
 #### 6. Oracle
 
-- Liquidation under **Q1 option A** (premium-only) reads **no price**. Its eligibility is price-independent, like everything in ADR-0003. Force exercise always reads the reference.
-- The P4 read is a wrapper over `oracle::load_price_update` + `check_price`, with a **P4 staleness window** (Q4) tighter than the 60 s mint gate. It also requires `posted_slot` to lie within a bounded number of slots of `Clock::slot`, which closes the ADR-0004 "cherry-pick inside the window" hole without new state.
-- Any oracle failure **refuses** the instruction (fail closed). It never touches the owner's own exits, which read no oracle (`oracle.rs:17-18`).
+- Liquidation reads **no price** (Q1 = A).
+- Force exercise reads the reference through `oracle::load_price_update` and `check_price`, with the 30 s window.
+- A `posted_slot` monotonicity check is **not** added. The 300-tick band makes cherry-picking a 30 s-old update immaterial; add it if the band is ever narrowed.
+- Any oracle failure refuses the instruction. The owner's own exits read no oracle and are unaffected.
 
 #### 7. Conservation and events
 
-- Every move is between existing ledgers:
-  - `free_usdc(owner) → range_vault` (premium, a real transfer, as in settle)
-  - `free_usdc(owner) → free_usdc(liquidator)` (bonus, internal)
-  - `free_usdc(exercisor) → free_usdc(exercisee)` (fee, internal)
-- Both reconcile identities in `scripts/reconcile.mjs` must stay exact: `vault + Σ in_orca == Σ(free + locked)` and `range_vault == premium_pool + dust`.
-- New events:
+- **Moves:**
+  - premium: `owner free_b → range_vault`, a real SPL transfer, as in settle
+  - bonus: `owner free_b → liquidator free_b`, internal
+  - fee: `exercisor free_b → owner free_b`, internal
+
+  Both `scripts/reconcile.mjs` identities stay exact.
+- **Events:**
   - `LongLiquidated { market, owner, liquidator, perma_position, size, premium_paid, bonus, shortfall, paused }`
-  - `LongForceExercised { market, owner, exercisor, perma_position, size, premium_paid, fee, reference_price, conf, publish_time }`
+  - `LongForceExercised { market, owner, exercisor, perma_position, size, premium_paid, fee, tick, reference_price, conf, publish_time }`
+- **Errors** are appended after 6040: `AccountSolvent`, `NotExercisable`, `SelfExercise`.
+- The indexer's `/liquidations` and the client's refusal of a non-empty array change in a **later** web slice, not in the program slice.
 
-  The indexer's `/liquidations` is then populated from these, and the web client's refusal of a non-empty array is lifted in the same change.
-- New errors are appended after `OracleDeviationTooHigh` (6040).
+### Decisions (Q1–Q6, 2026-09-26)
 
-### Test vectors (names from the spec; amounts only after §Open questions are answered)
+| # | Question | Decision |
+|---|---|---|
+| Q1 | Account-value model | **A: premium-only.** No price on the liquidation path. |
+| Q2 | Maintenance and bonus | `MAINT_MARGIN_BPS = 7_500`. Bonus `min(R/2, D, m × margin)`. |
+| Q3 | Force fee | 100-slot premium base, halving per half-width from the range midpoint, at most 10 halvings. |
+| Q4 | P4 staleness | 30 s, force exercise only. |
+| Q5 | Who may call | Anyone with a PERMA account in the market; exercisor ≠ owner. |
+| Q6 | Pause | Both allowed while paused; a shortfall auto-pauses. |
+
+### Test vectors
 
 | Vector | Where | Asserts |
 |---|---|---|
-| `LIQ_SOLVENT_REJECT` | `risk.rs` unit + `tests/liquidation.ts` | Solvent at maintenance → `AccountSolvent`, nothing moves |
-| `LIQ_INSOLVENT_OK` | same | Below maintenance → closes; bonus ≤ cap; premium paid first |
-| `LIQ_SPOT_SPIKE_FAIL` | `tests/force-exercise.ts` (and `tests/liquidation.ts` if Q1 = B) | Spot moved, reference healthy → refused |
-| `LIQ_STALE_ORACLE_FAIL` | same | Update older than the P4 window, or `posted_slot` too old → refused |
-| `LIQ_PAUSE_INTERACTION` | `tests/liquidation.ts` | Allowed while paused; shortfall sets `is_paused` and emits `shortfall` |
-| `FX_IN_RANGE_REJECT` | `tests/force-exercise.ts` | Reference inside the range (conf-widened) → refused |
-| `FX_OOR_OK` | same | OOR both by reference and spot → closes; fee to exercisee; `available_short_liquidity` restored; the short can now burn |
-| `FX_NEAR_RANGE_FEE` / `FX_FAR_RANGE_FEE` | unit fixtures in `docs/06-testing/FIXTURES-AND-VECTORS.md` | The fee schedule at the frozen points |
-| `BOTH_CONSERVATION` | both suites + `reconcile.mjs` | Both identities exact after every liquidation / force |
-| `SPOOF_POSITION_LIST` | both suites | Duplicate, foreign, closed, or missing long in the list → `MissingOpenLong`; target not in the list → refused |
+| `LIQ_SOLVENT_REJECT` | `risk.rs` unit + `tests/liquidation.ts` | At or above maintenance → `AccountSolvent`, nothing moves |
+| `LIQ_INSOLVENT_OK` | same | Below maintenance → closes; premium paid first; bonus = the three-way min |
+| `LIQ_SPOT_SPIKE_FAIL` | `tests/force-exercise.ts` | Spot OOR but reference in range (deviation) → refused. Liquidation has no price to spike. |
+| `LIQ_STALE_ORACLE_FAIL` | `tests/force-exercise.ts` | Update older than 30 s → `OracleStale` |
+| `LIQ_PAUSE_INTERACTION` | `tests/liquidation.ts` | Allowed while paused; a shortfall sets `is_paused` and emits `shortfall` |
+| `FX_IN_RANGE_REJECT` | `risk.rs` unit + `tests/force-exercise.ts` | Tick inside the range or within the 300-tick band → `NotExercisable` |
+| `FX_OOR_OK` | `tests/force-exercise.ts` | Eligible → closes; fee to the owner; `available_short_liquidity` restored; the short can burn |
+| `FX_NEAR_RANGE_FEE` / `FX_FAR_RANGE_FEE` | `risk.rs` unit, `FIXTURES-AND-VECTORS.md` §8 | Fee at the frozen points |
+| `BOTH_CONSERVATION` | both suites + `reconcile.mjs` | Both identities exact after each |
+| `SPOOF_POSITION_LIST` | both suites | Duplicate, foreign or missing long → `MissingOpenLong`; target not in the list → refused |
 
-### Open questions (human decisions — **must be answered before Accepted**)
-
-| # | Question | Options / what is needed |
-|---|---|---|
-| Q1 | Account-value model | **A (recommended for P4 v1):** premium-only, as §1. No price on the liquidation path; small scope. **B:** price-valued account value (WSOL at `min(spot, price − conf)`, short P&L, long intrinsic). Needs a funded counterparty for intrinsic value; much larger, likely its own phase. |
-| Q2 | Maintenance factor `m` and bonus | Value of `m` (0 < m < 1), the bonus share of remaining free USDC, and the per-account cap. |
-| Q3 | Force fee schedule | Near / far points and the shape between them (e.g. linear in ticks from the boundary, with a floor). |
-| Q4 | P4 staleness | Seconds (< 60) and the maximum `posted_slot` lag. |
-| Q5 | Who may call | Permissionless for both, or an allowlisted keeper for liquidation first. Force exercise: anyone, or only a short in the same range. |
-| Q6 | Pause | Confirm "allowed while paused" (§4) and auto-pause on shortfall, versus refusing both while paused. |
-
-### Consequences (if Accepted as proposed)
+### Consequences
 
 - **Positive**:
-  - The Fair "stuck long" is gone. Sellers can always recover pinned inventory.
-  - No new ledger or stored aggregate: eligibility reuses `required_free_usdc` over the validated long list.
-  - Under Q1 = A, oracle risk is confined to force exercise.
+  - The Fair "stuck long" is gone, and sellers can always recover pinned inventory.
+  - No new ledger: eligibility reuses `required_free_usdc` and `collect_open_longs`.
+  - Liquidation cannot be price-manipulated, because it reads no price.
 - **Negative, accepted**:
-  - One long per call means an 8-long account needs up to 8 transactions.
-  - Under Q1 = A, a long never pays or receives intrinsic value; force exercise is closure plus a fee, not a Panoptic-style exercise payout.
+  - An 8-long account may need up to 8 liquidation calls.
+  - There is no intrinsic payout: force exercise is a close plus a fee, not a Panoptic-style exercise.
   - A shortfall halts the market until an admin acts.
+  - The force fee is premium-denominated, not a % of notional (PERMA has no notional without tick → price math).
 
 ### Not in P4
 
-Multi-leg portfolio margin (P5), a non-Orca CLMM (P6), WSOL as margin unless Q1 = B, a PERMA oracle ring, Switchboard. Any Panoptic code: behaviour reference only; the code is BUSL and must not be copied.
+Multi-leg portfolio margin (P5), a non-Orca CLMM (P6), WSOL as margin, price-valued account value, a PERMA oracle ring, Switchboard, and any Panoptic code.
+
+Sources:
+- [Panoptic — Liquidations](https://panoptic.xyz/docs/panoptic-protocol/liquidations)
+- [Panoptic — Force Exercise](https://panoptic.xyz/docs/product/force-exercise)
+- [Code4rena 2024-09 Panoptic (PanopticPool / CollateralTracker)](https://github.com/code-423n4/2024-09-panoptic)
+- [Code4rena 2025-12 Panoptic](https://github.com/code-423n4/2025-12-panoptic)
+- [Panoptic whitepaper (arXiv 2204.14232)](https://arxiv.org/abs/2204.14232)

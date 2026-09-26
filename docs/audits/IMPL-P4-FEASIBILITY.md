@@ -2,7 +2,7 @@
 
 > Prototype. Not audited. Single pool. Not production mainnet risk capital.
 
-**Verdict: GO WITH BLOCKERS.** The program already has most of what P4 needs: the validated open-long list, a permissionless settle, the ADR-0001 close order, the P3 oracle read, and pause flags. No P4 code may be written yet. **Blockers (human decisions, not engineering):** the open questions in [ADR-0005](../adr/ADR-0005-force-exercise-and-liquidation.md) §Open questions. The most important is **Q1**: does liquidation stay premium-only (no price needed), or does P4 bring in price-valued account value? That decides whether the oracle is on the liquidation path at all.
+**Verdict: GO.** [ADR-0005](../adr/ADR-0005-force-exercise-and-liquidation.md) is **Accepted** (2026-09-26). Q1–Q6 were decided from the engineering recommendations after a Panoptic behaviour review (ADR §Panoptic reference). Liquidation is premium-only and reads no price. Force exercise uses a 300-tick band plus the P3 oracle check at 30 s. The numbers are in ADR §3 and `FIXTURES-AND-VECTORS.md` §8. The program already has most of what P4 needs: the validated open-long list, a permissionless settle, the ADR-0001 close order, the P3 oracle read, and pause flags.
 
 Checkout: `master` @ `e3e5a91`, plus the uncommitted Hermes fix (P3 devnet closeout). P3 is shipped on localnet (2026-09-23) and Solana-devnet (2026-09-25).
 
@@ -33,26 +33,26 @@ Spec inputs: [`LIQUIDATION-AND-FORCE-EXERCISE.md`](../09-post-mvp/LIQUIDATION-AN
 - **Shorts are not liquidated.** A short owes nothing (item 1). Closing a short would need the 11+ Orca accounts at ~1156 B (short-mint measurement, `IMPL-P3-FEASIBILITY.md` Q0 #7) and would buy nothing for solvency. P4 v1 liquidates longs only. If ADR-0005 Q1 later brings short P&L into account value, the Orca close is per-position and gets its own transaction.
 - **CU.** No new heavy math: `collect_open_longs` + `payable_if_settled_now` × 8 + one oracle parse. The measurement comes in Phase 1 against the existing 200k default.
 
-## Q2 — What P4 must add (after ADR-0005 is Accepted)
+## Q2 — What P4 must add (ADR-0005 Accepted)
 
 1. `liquidate_long` (permissionless or keeper, per Q5): whole-account insolvency check → pay what free USDC covers into the range vault → the unpaid rest is bad debt (per ADR-0005: pause, never socialize) → bonus (Q2) → `close_long` bookkeeping → `LongLiquidated` event.
 2. `force_exercise` (the exercisor signs and pays the fee): OOR eligibility against a checked reference, never a single tick → settle the long's premium → fee to the exercisee (Q3) → `close_long` → `LongForceExercised` event.
-3. Oracle: a new `oracle::reference_price` wrapper over `load_price_update` + `check_price` with the P4 staleness window (Q4) and the ADR-0004 conservative selection. The mint gate does not change.
-4. Errors appended after 6040. Indexer `/liquidations` then populated from the new events; the client refusal of a non-empty array (`RELEASE-GATE.md` §4.5) is lifted in the same change.
+3. Oracle: force exercise calls `load_price_update` + `check_price` with a 30 s window (ADR-0005 §6). No new wrapper and no `posted_slot` check: the 300-tick band makes the reference unambiguous. The mint gate does not change.
+4. Errors appended after 6040. The indexer `/liquidations` and the client refusal of a non-empty array (`RELEASE-GATE.md` §4.5) change in a later web slice.
 5. Named vectors: see ADR-0005 §Test vectors.
 
-Out of scope until ADR-0005 is Accepted: every item above, plus the liquidation-distance UI (the `perma-fair-surface` skill blocks it), P5 multi-leg, P6 Raydium.
+Still out of scope: the liquidation-distance UI (the `perma-fair-surface` skill blocks it), P5 multi-leg, P6 Raydium.
 
 ## Q3 — Risks
 
 | Risk | Mitigation |
 |---|---|
-| Cherry-picked oracle update (item 9) | Tighter P4 staleness (Q4) and a `posted_slot` ≥ last-used check, or no price on the liquidation path (Q1 option A). |
+| Cherry-picked oracle update (item 9) | Liquidation reads no price. Force exercise uses 30 s, and the 300-tick band exceeds deviation + confidence. |
 | Spot manipulation to force-exercise a long | OOR is judged against the reference, and spot must agree with it (the existing 200 bps deviation check). Never a single tick. |
-| Griefing liquidator splits a close to farm bonus | Bonus bounded per account, not per call; eligibility re-checked every call (ADR-0005). |
+| Griefing liquidator splits a close to farm bonus | Bonus ≤ the maintenance margin the close releases, and eligibility is re-checked every call (ADR-0005 §1). |
 | Oracle outage traps an insolvent long | By design, an outage **refuses** liquidation (fail closed) but never blocks the owner's own burn/withdraw, which have no oracle (item 8). |
 | Bad debt | PRD B30: halt the market (`pause_market`), never silent socialization. The short keeps its unpaid claim as `premium_receivable` (existing carry). |
 
 ## Verdict
 
-**GO WITH BLOCKERS** — engineering is unblocked; the ADR's open questions (Q1–Q5) need a human answer before Phase 1 code.
+**GO**: ADR-0005 is Accepted, so Phase 1 code may start.
