@@ -1029,6 +1029,133 @@ pub mod perma {
         Ok(())
     }
 
+    /// **Liquidate one long** of an account below maintenance (ADR-0005 §1).
+    ///
+    /// Permissionless and price-free: eligibility is premium over time, as in
+    /// ADR-0003, so no spot or oracle move can make an account liquidatable.
+    /// One long per call; each call re-checks the whole account, so a split
+    /// liquidation stops as soon as the account is healthy again.
+    ///
+    /// remaining_accounts: the **owner's** full open-long list.
+    pub fn liquidate_long<'info>(
+        mut ctx: Context<'info, CloseLongByCaller<'info>>,
+    ) -> Result<()> {
+        let (free, deficit, target_margin) = {
+            let a = &ctx.accounts;
+            let projected = premium::projected_index(
+                &a.premium_index,
+                a.market.premium_rate,
+                Clock::get()?.slot,
+            )?;
+            let longs = target_open_longs(&ctx)?;
+            let free = a.user_collateral.free(Side::B);
+            let maint = risk::maintenance_free_usdc(&a.user_collateral, &longs, projected, &a.market)?;
+            require!(free < maint, PermaError::AccountSolvent);
+            let target_margin = risk::required_margin(&a.market, a.perma_position.liquidity)?;
+            (free, maint - free, target_margin)
+        };
+
+        let (size, payable, paid) = close_long_for_caller(&mut ctx, free)?;
+        let shortfall = payable - paid;
+
+        let a = &mut ctx.accounts;
+        let bonus = if shortfall == 0 {
+            risk::liquidation_bonus(a.user_collateral.free(Side::B), deficit, target_margin)?
+        } else {
+            // PRD B30: halt, never socialize. The range's shorts keep the
+            // unpaid part as their existing `premium_receivable` carry.
+            a.market.is_paused = true;
+            0
+        };
+        collateral::debit_usdc(&mut a.user_collateral, bonus)?;
+        collateral::credit_usdc(&mut a.caller_collateral, bonus)?;
+
+        emit!(LongLiquidated {
+            market: a.market.key(),
+            owner: a.owner.key(),
+            liquidator: a.caller.key(),
+            perma_position: a.perma_position.key(),
+            size,
+            premium_paid: paid,
+            bonus,
+            shortfall,
+            paused: a.market.is_paused,
+        });
+        a.perma_position.close(a.owner.to_account_info())
+    }
+
+    /// **Force-exercise** a long whose range is far out of the money
+    /// (ADR-0005 §2), freeing the short liquidity it pins.
+    ///
+    /// The pool tick must be `oracle::FX_BAND_TICKS` beyond the range *and*
+    /// agree with a fresh Pyth reference, so spot alone never triggers it.
+    /// The owner's premium is paid in full (else this fails and liquidation
+    /// is the path), and the caller pays the owner a fee. Long P&L stays 0.
+    ///
+    /// remaining_accounts: the **caller's** full open-long list, for the fee.
+    pub fn force_exercise<'info>(mut ctx: Context<'info, CloseLongByCaller<'info>>) -> Result<()> {
+        let (fee, tick, msg) = {
+            let a = &ctx.accounts;
+            let wp = a.whirlpool.as_ref().ok_or(PermaError::InvalidAsset)?;
+            require_keys_eq!(wp.key(), a.market.whirlpool, PermaError::WhirlpoolNotAllowlisted);
+            let pool = load_whirlpool(wp)?;
+            let tick = get_current_tick(&pool);
+            let pos = &a.perma_position;
+            require!(
+                oracle::is_exercisable(pos.tick_lower, pos.tick_upper, tick),
+                PermaError::NotExercisable
+            );
+            let price_update = a.price_update.as_ref().ok_or(PermaError::OracleUnavailable)?;
+            let msg = oracle::check_exercise_price(price_update, get_sqrt_price_x64(&pool))?;
+            let fee = risk::force_exercise_fee(
+                &a.market,
+                pos.liquidity,
+                pos.tick_lower,
+                pos.tick_upper,
+                tick,
+            )?;
+
+            // The fee leaves the caller's free USDC exactly as a withdraw would.
+            let caller = &a.caller_collateral;
+            let longs = risk::collect_open_longs(
+                ctx.remaining_accounts,
+                ctx.program_id,
+                &a.market.key(),
+                &caller.owner,
+                caller.open_longs,
+            )?;
+            let projected = premium::projected_index(
+                &a.premium_index,
+                a.market.premium_rate,
+                Clock::get()?.slot,
+            )?;
+            risk::check_withdraw_allowed(caller, &longs, projected, &a.market, 0, fee)?;
+            (fee, tick, msg)
+        };
+
+        // Pays in full or fails `InsufficientCollateralForLoss`.
+        let (size, _, paid) = close_long_for_caller(&mut ctx, u64::MAX)?;
+
+        let a = &mut ctx.accounts;
+        collateral::debit_usdc(&mut a.caller_collateral, fee)?;
+        collateral::credit_usdc(&mut a.user_collateral, fee)?;
+
+        emit!(LongForceExercised {
+            market: a.market.key(),
+            owner: a.owner.key(),
+            exercisor: a.caller.key(),
+            perma_position: a.perma_position.key(),
+            size,
+            premium_paid: paid,
+            fee,
+            tick,
+            reference_price: msg.price,
+            conf: msg.conf,
+            publish_time: msg.publish_time,
+        });
+        a.perma_position.close(a.owner.to_account_info())
+    }
+
     /// Create the Orca position for a new short and register it with PERMA.
     ///
     /// Runs as a **prior transaction** to `adapter_add_liquidity` - bundling
@@ -1997,6 +2124,85 @@ fn claim_short_premium_cash<'info>(
     Ok((paid, still_owed))
 }
 
+/// The owner's open-long list for `liquidate_long`, which must include the target.
+fn target_open_longs<'info>(
+    ctx: &Context<'info, CloseLongByCaller<'info>>,
+) -> Result<Vec<PermaPosition>> {
+    let a = &ctx.accounts;
+    let longs = risk::collect_open_longs(
+        ctx.remaining_accounts,
+        ctx.program_id,
+        &a.market.key(),
+        &a.owner.key(),
+        a.user_collateral.open_longs,
+    )?;
+    require!(
+        ctx.remaining_accounts
+            .iter()
+            .any(|i| i.key() == a.perma_position.key()),
+        PermaError::MissingOpenLong
+    );
+    Ok(longs)
+}
+
+/// Close a long on a third party's call: the burn prefix, then pay up to
+/// `pay_cap` of its premium into the range vault, then `close_long`.
+///
+/// Returns `(size, payable, paid)`. With `pay_cap = u64::MAX` an owner who
+/// cannot pay fails `InsufficientCollateralForLoss`, exactly like a burn.
+/// The caller closes the account after emitting its event.
+fn close_long_for_caller<'info>(
+    ctx: &mut Context<'info, CloseLongByCaller<'info>>,
+    pay_cap: u64,
+) -> Result<(u128, u64, u64)> {
+    let a = &mut ctx.accounts;
+    let market_key = a.market.key();
+    let (tick_lower, tick_upper) = (a.perma_position.tick_lower, a.perma_position.tick_upper);
+    let (expected_vault, _) = Pubkey::find_program_address(
+        &[
+            seeds::RANGE_VAULT,
+            market_key.as_ref(),
+            &tick_lower.to_le_bytes(),
+            &tick_upper.to_le_bytes(),
+        ],
+        ctx.program_id,
+    );
+    require_keys_eq!(a.range_vault.key(), expected_vault, PermaError::RangeStateMismatch);
+
+    let now = Clock::get()?.slot;
+    premium::update_index(&mut a.premium_index, a.market.premium_rate, now)?;
+    premium::poke_range(&a.premium_index, &a.market, &mut a.range_state)?;
+    premium::accrue_long(&a.premium_index, &a.market, &mut a.perma_position)?;
+    let payable = premium::payable_from(&mut a.perma_position);
+    let paid = payable.min(pay_cap);
+
+    if paid > 0 {
+        collateral::debit_usdc(&mut a.user_collateral, paid)?;
+        let auth_bump = [a.market.authority_bump];
+        let signer: &[&[u8]] = &[seeds::MARKET_AUTHORITY, market_key.as_ref(), &auth_bump];
+        spl_transfer(
+            &a.token_program.to_account_info(),
+            &a.vault_b.to_account_info(),
+            &a.range_vault.to_account_info(),
+            &a.market_authority.to_account_info(),
+            paid,
+            Some(&[signer]),
+        )?;
+        premium::apply_long_payment(&mut a.range_state, paid)?;
+        let cleared = a.user_collateral.premium_owed_usdc.min(paid);
+        a.user_collateral.premium_owed_usdc -= cleared;
+    }
+
+    let size = a.perma_position.liquidity;
+    position::close_long(&mut a.perma_position, &mut a.user_collateral)?;
+    a.range_state.total_long_liquidity = a
+        .range_state
+        .total_long_liquidity
+        .checked_sub(size)
+        .ok_or(PermaError::MathOverflow)?;
+    Ok((size, payable, paid))
+}
+
 /// The LONG branch of `mint_position`.
 ///
 /// Called after the shared `update_index` -> `poke_range` prefix has already
@@ -2566,6 +2772,81 @@ pub struct BurnPosition<'info> {
     pub memo_program: Option<UncheckedAccount<'info>>,
     /// CHECK: checked against the pinned program ID.
     pub whirlpool_program: Option<UncheckedAccount<'info>>,
+}
+
+/// `liquidate_long` and `force_exercise`: a caller closes someone else's long.
+#[derive(Accounts)]
+pub struct CloseLongByCaller<'info> {
+    pub caller: Signer<'info>,
+
+    /// The bonus lands here, or the fee leaves from here.
+    #[account(
+        mut,
+        seeds = [seeds::COLLATERAL, market.key().as_ref(), caller.key().as_ref()],
+        bump = caller_collateral.bump,
+        has_one = market,
+    )]
+    pub caller_collateral: Account<'info, UserCollateral>,
+
+    /// CHECK: the long's owner. Receives the position's rent. Must differ
+    /// from `caller`, or one `UserCollateral` would be written twice.
+    #[account(mut, constraint = owner.key() != caller.key() @ PermaError::SelfTarget)]
+    pub owner: UncheckedAccount<'info>,
+
+    /// `mut` only for the shortfall auto-pause.
+    #[account(mut, seeds = [seeds::MARKET, market.whirlpool.as_ref()], bump = market.bump)]
+    pub market: Account<'info, Market>,
+
+    /// CHECK: signs the `vault_b` -> range vault transfer.
+    #[account(seeds = [seeds::MARKET_AUTHORITY, market.key().as_ref()], bump = market.authority_bump)]
+    pub market_authority: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        seeds = [seeds::COLLATERAL, market.key().as_ref(), owner.key().as_ref()],
+        bump = user_collateral.bump,
+        has_one = market,
+        has_one = owner,
+    )]
+    pub user_collateral: Account<'info, UserCollateral>,
+
+    #[account(
+        mut,
+        seeds = [seeds::PERMA_POSITION, market.key().as_ref(), owner.key().as_ref(), &perma_position.nonce.to_le_bytes()],
+        bump = perma_position.bump,
+        has_one = market,
+        has_one = owner,
+        constraint = perma_position.leg_type == leg_type::LONG @ PermaError::InvalidLegType,
+        constraint = perma_position.status == position_status::OPEN @ PermaError::PositionAlreadyClosed,
+    )]
+    pub perma_position: Account<'info, PermaPosition>,
+
+    #[account(mut, seeds = [seeds::PREMIUM_INDEX, market.key().as_ref()], bump = premium_index.bump)]
+    pub premium_index: Account<'info, GlobalPremiumIndex>,
+
+    #[account(
+        mut,
+        seeds = [seeds::RANGE, market.key().as_ref(), &perma_position.tick_lower.to_le_bytes(), &perma_position.tick_upper.to_le_bytes()],
+        bump = range_state.bump
+    )]
+    pub range_state: Account<'info, RangePremiumState>,
+
+    /// CHECK: the premium escrow PDA, derived in the handler.
+    #[account(mut)]
+    pub range_vault: UncheckedAccount<'info>,
+
+    /// CHECK: the shared PERMA devUSDC collateral vault.
+    #[account(mut, address = market.vault_b)]
+    pub vault_b: UncheckedAccount<'info>,
+
+    /// CHECK: checked against SPL Token in `spl_transfer`.
+    pub token_program: UncheckedAccount<'info>,
+
+    /// `force_exercise` only; checked against `market.whirlpool`.
+    /// CHECK: parsed by `load_whirlpool`.
+    pub whirlpool: Option<UncheckedAccount<'info>>,
+    /// `force_exercise` only. CHECK: `oracle::load_price_update`.
+    pub price_update: Option<UncheckedAccount<'info>>,
 }
 
 #[derive(Accounts)]
@@ -3215,6 +3496,35 @@ pub struct LongBurned {
     pub premium_paid_usdc: u64,
     pub total_long_liquidity: u128,
     pub available_after: u128,
+}
+
+#[event]
+pub struct LongLiquidated {
+    pub market: Pubkey,
+    pub owner: Pubkey,
+    pub liquidator: Pubkey,
+    pub perma_position: Pubkey,
+    pub size: u128,
+    pub premium_paid: u64,
+    pub bonus: u64,
+    /// Premium the owner could not pay. Non-zero pauses the market.
+    pub shortfall: u64,
+    pub paused: bool,
+}
+
+#[event]
+pub struct LongForceExercised {
+    pub market: Pubkey,
+    pub owner: Pubkey,
+    pub exercisor: Pubkey,
+    pub perma_position: Pubkey,
+    pub size: u128,
+    pub premium_paid: u64,
+    pub fee: u64,
+    pub tick: i32,
+    pub reference_price: i64,
+    pub conf: u64,
+    pub publish_time: i64,
 }
 
 #[event]

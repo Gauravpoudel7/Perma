@@ -22,6 +22,10 @@
 
 The devnet program runs P3 (ELF **604,992 B**, slot **502908043**). The allowlisted pool `2WUg…` was swapped back to Pyth SOL/USD (~$117) and is within the 200 bps band. `yarn smoke-devnet-p3 --smoke` is green: Hermes post, deposit, mint short, mint long, close the Pyth accounts, then settle, close long, close short. The web client asks for **one** wallet approval for the three Pyth transactions and refuses a Hermes update older than 30 s before it sends anything. Web `yarn test` **113**. Ticket: [`P3-DEVNET-POOL-PRICE.md`](../audits/P3-DEVNET-POOL-PRICE.md).
 
+## Protocol V1 P4 (liquidation + force exercise) — **PASSED on localnet** (2026-09-26)
+
+**132 passing / 0 failing** on a fresh ledger (122 + 1 SPL Token id guard in `tests/collateral.ts` + 9 in `tests/liquidation.ts`); unit **81**. [ADR-0005](../adr/ADR-0005-force-exercise-and-liquidation.md) is Accepted; the vectors are in [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) §8. **Solana-devnet still runs the P3 build**, and that build lacks the SPL Token id guard (commit `3c8652b`). Upgrading it needs an explicit operator GO.
+
 **Checklist notes (Fair honesty):** S1–S5, A1–A3, Q1, Q3 met by the green suites above. Q2 anti-slop remains an ongoing UI bar. E1/E2: localnet product loop (deposit → short → long → portfolio) verified by hand; Fair has **no mark P&L** ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)) — UI shows positions, collateral, and premium, not CEX-style P&L%. Devnet full `E2E-DEMO-SCRIPT` remains optional ops polish, not a Fair reopen.
 
 ---
@@ -188,10 +192,10 @@ npx ts-mocha -p ./tsconfig.json -t 1000000 \
   tests/factory.ts tests/position-short.ts tests/position-long.ts \
   tests/settle-premium.ts tests/risk-solvency.ts \
   tests/admin-transfer.ts tests/range-unwind.ts tests/oracle-risk.ts \
-  tests/pause-admin.ts tests/events.ts
+  tests/pause-admin.ts tests/events.ts tests/liquidation.ts
 ```
 
-Expected: **122 passing, 0 failing** (76 through component 09 + 7 in `tests/admin-transfer.ts` + 5 in `tests/range-unwind.ts` + 8 in `tests/oracle-risk.ts` + 17 in `tests/pause-admin.ts` + 9 in `tests/events.ts`). Every minting suite refreshes the tag-0 mock price itself (`tests/oracle-mock.ts`); `oracle-risk.ts` pauses/unpauses and restores that price in a `finally`, so it self-heals like the P1 suites. The two P1 suites (Protocol V1 — `transfer_admin`, `unwind_empty_range`) go before `pause-admin.ts`; they self-heal the same way, and `admin-transfer.ts` hands `GlobalConfig.admin` back to the provider wallet in an unconditional `after()`. This covers gates **S1–S5** below. `pause-admin.ts` and `events.ts` go **last** in the forward list: both self-heal (unpause + restore risk defaults + burn what they opened) in their own `before()`/`after()`, so the reversed pass — where they run first — also stays clean.
+Expected: **132 passing, 0 failing** (77 through component 09 + 7 in `tests/admin-transfer.ts` + 5 in `tests/range-unwind.ts` + 8 in `tests/oracle-risk.ts` + 17 in `tests/pause-admin.ts` + 9 in `tests/events.ts` + 9 in `tests/liquidation.ts`). Every minting suite refreshes the tag-0 mock price itself (`tests/oracle-mock.ts`); `oracle-risk.ts` pauses/unpauses and restores that price in a `finally`, so it self-heals like the P1 suites. The two P1 suites (Protocol V1 — `transfer_admin`, `unwind_empty_range`) go before `pause-admin.ts`; they self-heal the same way, and `admin-transfer.ts` hands `GlobalConfig.admin` back to the provider wallet in an unconditional `after()`. This covers gates **S1–S5** below. `pause-admin.ts` and `events.ts` go **last** in the forward list, followed only by the P4 `liquidation.ts`. All three self-heal (unpause + restore risk defaults + burn what they opened) in their own `before()`/`after()`, so the reversed pass — where they run first — also stays clean.
 
 > `tests/factory-rewards.ts` is **excluded on purpose** and needs its own `--reset`
 > ledger: it allowlists a different pool, so running it alongside makes every other
@@ -370,7 +374,7 @@ Sign off only with a real artifact per row — a transaction signature, or the t
 | E2 | UI shows live P&L and accrued premium matching on-chain state | §6 |
 | Q1 | The banner `Prototype. Not audited. Single pool. Not production mainnet risk capital.` is visible on **every** page, verbatim and non-dismissible | [`COPY-DECK.md`](../04-ui-ux/COPY-DECK.md) §1 |
 | Q2 | All screens pass the anti-slop review, including the banned-phrase list | [`UI-QA-CHECKLIST.md`](../04-ui-ux/UI-QA-CHECKLIST.md), `COPY-DECK.md` §5 |
-| Q3 | `yarn test:unit` green (75), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
+| Q3 | `yarn test:unit` green (81), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
 
 **The gate passes only when every row above passes.** A partial pass is a FAIL.
 

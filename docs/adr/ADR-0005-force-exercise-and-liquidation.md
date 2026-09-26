@@ -71,11 +71,11 @@ Sources are Panoptic's public docs and the Code4rena audit repos (2024-09 and 20
   - Also the `whirlpool` and a Pyth `price_update`.
   - Remaining accounts: the **exercisor's** full open-long list, for the fee gate.
 - **Eligible** when both of these hold:
-  - The pool tick is at least **`FX_BAND_TICKS = 300`** ticks outside the long's range: `tick ≥ tick_upper + 300` or `tick + 300 < tick_lower`.
+  - The pool tick is at least **`FX_BAND_TICKS = 310`** ticks outside the long's range: `tick ≥ tick_upper + 310` or `tick + 310 < tick_lower`.
   - `oracle::check_price` passes with **`FX_MAX_STALENESS_SECS = 30`**, plus the unchanged 100 bps confidence and 200 bps deviation limits.
 
-  Together these put the reference price outside the range even at `price ± conf`, because 1.0001^300 ≈ 3.05 % ≥ (1.02 × 1.01 − 1) ≈ 3.02 %. Moving spot alone cannot trigger an exercise, and a single spot tick is never trusted. Otherwise it fails with `NotExercisable`.
-- **The exercisor may not be the owner** (`SelfExercise`): the owner can simply burn.
+  Together these put the reference price outside the range even at `price ± conf`. The worst case is below the range, where `price + conf ≤ (1.01 / 0.98) × spot ≈ 1.0306 × spot`, and 1.0001^310 ≈ 1.0315. Above the range, `price − conf ≥ (0.99 / 1.02) × spot` needs less. A unit test derives this from the oracle constants. Moving spot alone cannot trigger an exercise, and a single spot tick is never trusted. Otherwise it fails with `NotExercisable`.
+- **The caller may not be the owner** (`SelfTarget`, for both instructions): the owner can simply burn, and one account on both sides would be written twice. In practice Anchor refuses first (`ConstraintDuplicateMutableAccount` on `user_collateral`); `SelfTarget` stays as the explicit guard should that check ever be relaxed.
 - **Effect, in order:**
   1. Poke the index and the range.
   2. Accrue the target long and pay its premium **in full** (the `pay_long_premium_cash` path). An owner who cannot pay fails `InsufficientCollateralForLoss`, which routes the case to liquidation first (§5).
@@ -92,7 +92,7 @@ Sources are Panoptic's public docs and the Code4rena audit repos (2024-09 and 20
 | Constant | Value | Where |
 |---|---|---|
 | `MAINT_MARGIN_BPS` | 7_500 | `risk.rs` |
-| `FX_BAND_TICKS` | 300 | `oracle.rs` |
+| `FX_BAND_TICKS` | 310 | `oracle.rs` |
 | `FX_MAX_STALENESS_SECS` | 30 | `oracle.rs` |
 | `FX_FEE_BASE_SLOTS` | 100 | `risk.rs` |
 | `FX_FEE_MAX_HALVINGS` | 10 | `risk.rs` |
@@ -117,7 +117,7 @@ These are demo values. Change them only by amending this ADR. They are constants
 
 - Liquidation reads **no price** (Q1 = A).
 - Force exercise reads the reference through `oracle::load_price_update` and `check_price`, with the 30 s window.
-- A `posted_slot` monotonicity check is **not** added. The 300-tick band makes cherry-picking a 30 s-old update immaterial; add it if the band is ever narrowed.
+- A `posted_slot` monotonicity check is **not** added. The 310-tick band makes cherry-picking a 30 s-old update immaterial; add it if the band is ever narrowed.
 - Any oracle failure refuses the instruction. The owner's own exits read no oracle and are unaffected.
 
 #### 7. Conservation and events
@@ -131,7 +131,7 @@ These are demo values. Change them only by amending this ADR. They are constants
 - **Events:**
   - `LongLiquidated { market, owner, liquidator, perma_position, size, premium_paid, bonus, shortfall, paused }`
   - `LongForceExercised { market, owner, exercisor, perma_position, size, premium_paid, fee, tick, reference_price, conf, publish_time }`
-- **Errors** are appended after 6040: `AccountSolvent`, `NotExercisable`, `SelfExercise`.
+- **Errors** are appended after 6040: `AccountSolvent` 6041, `NotExercisable` 6042, `SelfTarget` 6043.
 - The indexer's `/liquidations` and the client's refusal of a non-empty array change in a **later** web slice, not in the program slice.
 
 ### Decisions (Q1–Q6, 2026-09-26)
@@ -142,7 +142,7 @@ These are demo values. Change them only by amending this ADR. They are constants
 | Q2 | Maintenance and bonus | `MAINT_MARGIN_BPS = 7_500`. Bonus `min(R/2, D, m × margin)`. |
 | Q3 | Force fee | 100-slot premium base, halving per half-width from the range midpoint, at most 10 halvings. |
 | Q4 | P4 staleness | 30 s, force exercise only. |
-| Q5 | Who may call | Anyone with a PERMA account in the market; exercisor ≠ owner. |
+| Q5 | Who may call | Anyone with a PERMA account in the market; caller ≠ owner. |
 | Q6 | Pause | Both allowed while paused; a shortfall auto-pauses. |
 
 ### Test vectors
@@ -154,7 +154,7 @@ These are demo values. Change them only by amending this ADR. They are constants
 | `LIQ_SPOT_SPIKE_FAIL` | `tests/force-exercise.ts` | Spot OOR but reference in range (deviation) → refused. Liquidation has no price to spike. |
 | `LIQ_STALE_ORACLE_FAIL` | `tests/force-exercise.ts` | Update older than 30 s → `OracleStale` |
 | `LIQ_PAUSE_INTERACTION` | `tests/liquidation.ts` | Allowed while paused; a shortfall sets `is_paused` and emits `shortfall` |
-| `FX_IN_RANGE_REJECT` | `risk.rs` unit + `tests/force-exercise.ts` | Tick inside the range or within the 300-tick band → `NotExercisable` |
+| `FX_IN_RANGE_REJECT` | `risk.rs` unit + `tests/force-exercise.ts` | Tick inside the range or within the 310-tick band → `NotExercisable` |
 | `FX_OOR_OK` | `tests/force-exercise.ts` | Eligible → closes; fee to the owner; `available_short_liquidity` restored; the short can burn |
 | `FX_NEAR_RANGE_FEE` / `FX_FAR_RANGE_FEE` | `risk.rs` unit, `FIXTURES-AND-VECTORS.md` §8 | Fee at the frozen points |
 | `BOTH_CONSERVATION` | both suites + `reconcile.mjs` | Both identities exact after each |

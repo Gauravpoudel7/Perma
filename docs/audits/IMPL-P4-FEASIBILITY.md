@@ -2,7 +2,7 @@
 
 > Prototype. Not audited. Single pool. Not production mainnet risk capital.
 
-**Verdict: GO.** [ADR-0005](../adr/ADR-0005-force-exercise-and-liquidation.md) is **Accepted** (2026-09-26). Q1–Q6 were decided from the engineering recommendations after a Panoptic behaviour review (ADR §Panoptic reference). Liquidation is premium-only and reads no price. Force exercise uses a 300-tick band plus the P3 oracle check at 30 s. The numbers are in ADR §3 and `FIXTURES-AND-VECTORS.md` §8. The program already has most of what P4 needs: the validated open-long list, a permissionless settle, the ADR-0001 close order, the P3 oracle read, and pause flags.
+**Verdict: GO.** [ADR-0005](../adr/ADR-0005-force-exercise-and-liquidation.md) is **Accepted** (2026-09-26). Q1–Q6 were decided from the engineering recommendations after a Panoptic behaviour review (ADR §Panoptic reference). Liquidation is premium-only and reads no price. Force exercise uses a 310-tick band plus the P3 oracle check at 30 s. The numbers are in ADR §3 and `FIXTURES-AND-VECTORS.md` §8. The program already has most of what P4 needs: the validated open-long list, a permissionless settle, the ADR-0001 close order, the P3 oracle read, and pause flags.
 
 Checkout: `master` @ `e3e5a91`, plus the uncommitted Hermes fix (P3 devnet closeout). P3 is shipped on localnet (2026-09-23) and Solana-devnet (2026-09-25).
 
@@ -37,7 +37,7 @@ Spec inputs: [`LIQUIDATION-AND-FORCE-EXERCISE.md`](../09-post-mvp/LIQUIDATION-AN
 
 1. `liquidate_long` (permissionless or keeper, per Q5): whole-account insolvency check → pay what free USDC covers into the range vault → the unpaid rest is bad debt (per ADR-0005: pause, never socialize) → bonus (Q2) → `close_long` bookkeeping → `LongLiquidated` event.
 2. `force_exercise` (the exercisor signs and pays the fee): OOR eligibility against a checked reference, never a single tick → settle the long's premium → fee to the exercisee (Q3) → `close_long` → `LongForceExercised` event.
-3. Oracle: force exercise calls `load_price_update` + `check_price` with a 30 s window (ADR-0005 §6). No new wrapper and no `posted_slot` check: the 300-tick band makes the reference unambiguous. The mint gate does not change.
+3. Oracle: force exercise calls `load_price_update` + `check_price` with a 30 s window (ADR-0005 §6). No new wrapper and no `posted_slot` check: the 310-tick band makes the reference unambiguous. The mint gate does not change.
 4. Errors appended after 6040. The indexer `/liquidations` and the client refusal of a non-empty array (`RELEASE-GATE.md` §4.5) change in a later web slice.
 5. Named vectors: see ADR-0005 §Test vectors.
 
@@ -47,7 +47,7 @@ Still out of scope: the liquidation-distance UI (the `perma-fair-surface` skill 
 
 | Risk | Mitigation |
 |---|---|
-| Cherry-picked oracle update (item 9) | Liquidation reads no price. Force exercise uses 30 s, and the 300-tick band exceeds deviation + confidence. |
+| Cherry-picked oracle update (item 9) | Liquidation reads no price. Force exercise uses 30 s, and the 310-tick band exceeds deviation + confidence. |
 | Spot manipulation to force-exercise a long | OOR is judged against the reference, and spot must agree with it (the existing 200 bps deviation check). Never a single tick. |
 | Griefing liquidator splits a close to farm bonus | Bonus ≤ the maintenance margin the close releases, and eligibility is re-checked every call (ADR-0005 §1). |
 | Oracle outage traps an insolvent long | By design, an outage **refuses** liquidation (fail closed) but never blocks the owner's own burn/withdraw, which have no oracle (item 8). |

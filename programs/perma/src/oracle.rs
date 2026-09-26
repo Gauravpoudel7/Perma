@@ -5,7 +5,8 @@
 //! One fail-closed question, asked before `mint_position` opens any new
 //! exposure: *is the Whirlpool's spot within `MAX_DEVIATION_BPS` of a fresh,
 //! confident, externally verified reference price?* The reference is a Pyth
-//! pull `PriceUpdateV2` account for SOL/USD.
+//! pull `PriceUpdateV2` account for SOL/USD. `force_exercise` (ADR-0005) asks
+//! the same question with a 30 s window, after [`is_exercisable`].
 //!
 //! # What this is not
 //!
@@ -14,8 +15,9 @@
 //!   never read here or anywhere in PERMA.
 //! - **Not a price input to solvency.** `risk.rs` is untouched; spot is
 //!   *compared* against the reference, never used as a price.
-//! - **Not on any exit path.** Burn, settle, unlock and withdraw never call
-//!   this, so an oracle outage cannot trap funds.
+//! - **Not on any owner exit path.** Burn, settle, unlock and withdraw never
+//!   call this, so an oracle outage cannot trap funds. It refuses only a
+//!   third party's force exercise.
 //!
 //! # Why hand-parsed
 //!
@@ -125,6 +127,33 @@ pub fn check_price(msg: &PriceMsg, now_ts: i64, sqrt_price_x64: u128) -> Result<
         .ok_or(PermaError::MathOverflow)?;
     require!(dev_lhs <= MAX_DEVIATION_BPS * price, PermaError::OracleDeviationTooHigh);
     Ok(())
+}
+
+/// ADR-0005 §3 force-exercise policy. Demo values; change only by amending the ADR.
+pub const FX_BAND_TICKS: i32 = 310;
+pub const FX_MAX_STALENESS_SECS: i64 = 30;
+
+/// Is the pool tick `FX_BAND_TICKS` beyond the long's `[lower, upper)` range?
+///
+/// Wide enough that a tick this far out which also passes [`check_price`]
+/// puts the reference outside the range at `price ± conf` - see the
+/// `fx_band_covers_deviation_and_confidence` test. Spot alone can never
+/// trigger an exercise.
+pub fn is_exercisable(tick_lower: i32, tick_upper: i32, tick: i32) -> bool {
+    tick >= tick_upper.saturating_add(FX_BAND_TICKS)
+        || tick.saturating_add(FX_BAND_TICKS) < tick_lower
+}
+
+/// The force-exercise gate: [`check_price`] inside the tighter P4 window.
+pub fn check_exercise_price(price_update: &AccountInfo, sqrt_price_x64: u128) -> Result<PriceMsg> {
+    let msg = load_price_update(price_update)?;
+    let now = Clock::get()?.unix_timestamp;
+    require!(
+        now.saturating_sub(msg.publish_time) <= FX_MAX_STALENESS_SECS,
+        PermaError::OracleStale
+    );
+    check_price(&msg, now, sqrt_price_x64)?;
+    Ok(msg)
 }
 
 /// The mint gate: authentic account, then [`check_price`] against the pool.
@@ -247,5 +276,26 @@ mod tests {
         assert!(e.contains("OracleStale"), "{e}");
         let e = err_name(check_price(&msg(20_00000000, 1_000_000_000, 0), NOW, far));
         assert!(e.contains("OracleConfidenceTooWide"), "{e}");
+    }
+
+    /// Worst case is below the range: `price + conf ≤ (1 + c) / (1 − d) × spot`.
+    /// Above it, `price − conf ≥ (1 − c) / (1 + d) × spot`, which is weaker.
+    #[test]
+    fn fx_band_covers_deviation_and_confidence() {
+        let (c, d) = (MAX_CONF_BPS as f64 / 1e4, MAX_DEVIATION_BPS as f64 / 1e4);
+        let band = 1.0001f64.powi(FX_BAND_TICKS);
+        assert!(band > (1.0 + c) / (1.0 - d), "below-range bound");
+        assert!(band > (1.0 + d) / (1.0 - c), "above-range bound");
+    }
+
+    #[test]
+    fn fx_band_edges() {
+        let (lo, hi) = (-40176, -38168);
+        assert!(!is_exercisable(lo, hi, -39000), "in range");
+        assert!(!is_exercisable(lo, hi, hi), "just out of range, inside band");
+        assert!(!is_exercisable(lo, hi, hi + FX_BAND_TICKS - 1));
+        assert!(is_exercisable(lo, hi, hi + FX_BAND_TICKS));
+        assert!(!is_exercisable(lo, hi, lo - FX_BAND_TICKS));
+        assert!(is_exercisable(lo, hi, lo - FX_BAND_TICKS - 1));
     }
 }

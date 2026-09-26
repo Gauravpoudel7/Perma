@@ -14,7 +14,9 @@
 //!   `Oracle` PDA is adaptive-fee state). Nothing here reads a price.
 //! - **Not P&L.** A short's realized LP result is `returned − locked`, applied
 //!   once by `position::close_short`. A long closes at P&L = 0.
-//! - **Not liquidation.** An underwater long stays open with its debt standing.
+//! - **Liquidation reads no price either** (ADR-0005 §1): an account is
+//!   liquidatable when free USDC falls below [`maintenance_free_usdc`], the
+//!   same requirement with the forward margin discounted to 75 %.
 //!
 //! # Why the caller passes the longs
 //!
@@ -140,17 +142,93 @@ pub(crate) fn required_free_usdc(
     projected: u128,
     market: &Market,
 ) -> Result<u64> {
-    let mut total = user.premium_owed_usdc as u128;
+    let (owed, margin) = requirement_parts(user, longs, projected, market)?;
+    let total = owed.checked_add(margin).ok_or(PermaError::MathOverflow)?;
+    u64::try_from(total).map_err(|_| PermaError::MathOverflow.into())
+}
+
+/// `(owed now, Σ margin)` - the two halves of [`required_free_usdc`], kept
+/// apart so liquidation can discount the forward margin only.
+fn requirement_parts(
+    user: &UserCollateral,
+    longs: &[PermaPosition],
+    projected: u128,
+    market: &Market,
+) -> Result<(u128, u128)> {
+    let mut owed = user.premium_owed_usdc as u128;
+    let mut margin = 0u128;
     for pos in longs {
-        let owed = payable_if_settled_now(pos, projected, market)? as u128;
-        let margin = required_margin(market, pos.liquidity)? as u128;
-        total = total
-            .checked_add(owed)
-            .ok_or(PermaError::MathOverflow)?
-            .checked_add(margin)
+        owed = owed
+            .checked_add(payable_if_settled_now(pos, projected, market)? as u128)
+            .ok_or(PermaError::MathOverflow)?;
+        margin = margin
+            .checked_add(required_margin(market, pos.liquidity)? as u128)
             .ok_or(PermaError::MathOverflow)?;
     }
+    Ok((owed, margin))
+}
+
+/// ADR-0005 §3 numeric policy. Demo values; change only by amending the ADR.
+pub const MAINT_MARGIN_BPS: u128 = 7_500;
+pub const FX_FEE_BASE_SLOTS: u64 = 100;
+pub const FX_FEE_MAX_HALVINGS: i64 = 10;
+const BPS: u128 = 10_000;
+
+/// `⌈x × MAINT_MARGIN_BPS / 10_000⌉` - maintenance share of a margin.
+fn maint_share(x: u128) -> Result<u128> {
+    let scaled = x.checked_mul(MAINT_MARGIN_BPS).ok_or(PermaError::MathOverflow)?;
+    Ok(scaled.div_ceil(BPS))
+}
+
+/// Free USDC below which an account is liquidatable (ADR-0005 §1): owed
+/// premium in full plus 75 % of the forward margin. Initial requirement
+/// ([`required_free_usdc`]) is 4/3 of this margin, as in Panoptic.
+pub(crate) fn maintenance_free_usdc(
+    user: &UserCollateral,
+    longs: &[PermaPosition],
+    projected: u128,
+    market: &Market,
+) -> Result<u64> {
+    let (owed, margin) = requirement_parts(user, longs, projected, market)?;
+    let total = owed
+        .checked_add(maint_share(margin)?)
+        .ok_or(PermaError::MathOverflow)?;
     u64::try_from(total).map_err(|_| PermaError::MathOverflow.into())
+}
+
+/// `min(remaining / 2, deficit, maintenance margin the close releases)`.
+///
+/// The last term is what keeps a split liquidation from out-earning a single
+/// one: no call pays more than the maintenance it frees, so the deficit never
+/// grows between calls.
+pub(crate) fn liquidation_bonus(remaining: u64, deficit: u64, target_margin: u64) -> Result<u64> {
+    let released = u64::try_from(maint_share(target_margin as u128)?)
+        .map_err(|_| error!(PermaError::MathOverflow))?;
+    Ok((remaining / 2).min(deficit).min(released))
+}
+
+/// Force-exercise fee (ADR-0005 §2): the premium this long would pay over
+/// `FX_FEE_BASE_SLOTS`, halved per half-width the tick sits from the range
+/// midpoint, at most `FX_FEE_MAX_HALVINGS` times, floor 1 µUSDC.
+pub(crate) fn force_exercise_fee(
+    market: &Market,
+    liquidity: u128,
+    tick_lower: i32,
+    tick_upper: i32,
+    tick: i32,
+) -> Result<u64> {
+    let base = required_margin_with(
+        FX_FEE_BASE_SLOTS,
+        market.premium_rate,
+        market.premium_multiplier,
+        0,
+        liquidity,
+    )?;
+    let hw = ((i64::from(tick_upper) - i64::from(tick_lower)) / 2).max(1);
+    let mid = i64::from(tick_lower) + hw;
+    let n = ((i64::from(tick) - mid).abs() / hw).max(1);
+    let halvings = (n - 1).min(FX_FEE_MAX_HALVINGS) as u32;
+    Ok((base >> halvings).max(1))
 }
 
 /// Gate a withdrawal of `amount_a` WSOL and `amount_b` USDC.
@@ -529,5 +607,63 @@ mod tests {
         let l = long(1_500, 0);
         // 1 slot: 1e6 × 1500 × 1e3 / 1e12 = 1.5 → settle pays 1 (carry 0.5); gate counts 2.
         assert_eq!(payable_if_settled_now(&l, 1_000_000, &m).unwrap(), 2);
+    }
+
+    // --- P4, FIXTURES-AND-VECTORS.md §8 (ADR-0005) ---
+
+    const L: u128 = 50_000_000;
+    const SLOTS_100: u128 = 100 * 1_000_000; // projected index after 100 slots
+
+    /// L1 / L2: 75 % of `L + 1 USDC` is 38.25 USDC; the boundary is solvent.
+    #[test]
+    fn p4_maintenance_and_boundary() {
+        let m = market();
+        let longs = [long(L, 0)];
+        assert_eq!(maintenance_free_usdc(&user(0, 0), &longs, 0, &m).unwrap(), 38_250_000);
+        assert_eq!(
+            maintenance_free_usdc(&user(0, 0), &longs, SLOTS_100, &m).unwrap(),
+            43_250_000
+        );
+        // Initial requirement is unchanged by P4.
+        assert_eq!(required_free_usdc(&user(0, 0), &longs, SLOTS_100, &m).unwrap(), 56_000_000);
+    }
+
+    /// L2, L3: the bonus is the three-way minimum.
+    #[test]
+    fn p4_liquidation_bonus_vectors() {
+        let margin = 51_000_000;
+        // L2: free 40, owes 5 → R = 35, D = 3.25.
+        assert_eq!(liquidation_bonus(35_000_000, 3_250_000, margin).unwrap(), 3_250_000);
+        // L3: free 6, owes 5 → R = 1, D = 37.25 → R/2.
+        assert_eq!(liquidation_bonus(1_000_000, 37_250_000, margin).unwrap(), 500_000);
+        // Capped by the released maintenance margin.
+        assert_eq!(liquidation_bonus(u64::MAX, u64::MAX, margin).unwrap(), 38_250_000);
+    }
+
+    /// Splitting never beats one call: each bonus ≤ the maintenance it frees,
+    /// so the account's deficit is non-increasing across calls.
+    #[test]
+    fn p4_split_liquidation_never_grows_deficit() {
+        let m = market();
+        let a = long(L, 0);
+        let b = long(L, 0);
+        let mut free = 70_000_000u64; // maint for both = 2 × 38.25 = 76.5
+        let before = maintenance_free_usdc(&user(0, free), &[a.clone(), b.clone()], 0, &m).unwrap() - free;
+        let bonus = liquidation_bonus(free, before, required_margin(&m, L).unwrap()).unwrap();
+        free -= bonus;
+        let after = maintenance_free_usdc(&user(0, free), &[b], 0, &m).unwrap().saturating_sub(free);
+        assert!(after <= before, "deficit {after} grew from {before}");
+    }
+
+    /// FX_NEAR / FX_FAR / floors on the demo range [-40176, -38168).
+    #[test]
+    fn p4_force_exercise_fee_vectors() {
+        let m = market();
+        let fee = |liq, tick| force_exercise_fee(&m, liq, -40176, -38168, tick).unwrap();
+        assert_eq!(fee(L, -37858), 5_000_000, "FX_NEAR_RANGE_FEE");
+        assert_eq!(fee(L, -34152), 312_500, "FX_FAR_RANGE_FEE");
+        assert_eq!(fee(L, -20000), 4_882, "at most 10 halvings");
+        assert_eq!(fee(1, -37858), 1, "floor 1 µUSDC");
+        assert_eq!(fee(L, -44192), fee(L, -34152), "symmetric about the midpoint");
     }
 }

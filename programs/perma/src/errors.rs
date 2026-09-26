@@ -199,4 +199,17 @@ pub enum PermaError {
     /// reference - a manipulated or drifted pool.
     #[msg("Pool spot deviates too far from the reference price")]
     OracleDeviationTooHigh,
+
+    // --- P4 liquidation + force exercise (appended; 6041+), ADR-0005 ---
+    /// `liquidate_long` refused: free USDC still covers the maintenance
+    /// requirement (`risk::maintenance_free_usdc`).
+    #[msg("Account is above maintenance; nothing to liquidate")]
+    AccountSolvent,
+    /// `force_exercise` refused: the pool tick is not `oracle::FX_BAND_TICKS`
+    /// beyond the long's range.
+    #[msg("Long is not far enough out of range to force-exercise")]
+    NotExercisable,
+    /// The caller targeted their own long. Burn it instead.
+    #[msg("Cannot liquidate or force-exercise your own position")]
+    SelfTarget,
 }

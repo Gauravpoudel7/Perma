@@ -219,7 +219,7 @@ Every rejected vector also asserts the `perma_position` PDA was not created.
 
 ## 8. Liquidation + Force-Exercise Vectors — P4 ([ADR-0005](../adr/ADR-0005-force-exercise-and-liquidation.md))
 
-These use the §0 parameters and the demo risk defaults: `required_margin(L) = L + 1_000_000`. The ADR-0005 §3 constants are the only other inputs: `MAINT_MARGIN_BPS = 7_500`, `FX_BAND_TICKS = 300`, `FX_FEE_BASE_SLOTS = 100`, `FX_FEE_MAX_HALVINGS = 10`.
+These use the §0 parameters and the demo risk defaults: `required_margin(L) = L + 1_000_000`. The ADR-0005 §3 constants are the only other inputs: `MAINT_MARGIN_BPS = 7_500`, `FX_BAND_TICKS = 310`, `FX_FEE_BASE_SLOTS = 100`, `FX_FEE_MAX_HALVINGS = 10`.
 
 ### Liquidation (one long, `L = 50_000_000`, 50 000 µUSDC accrued per slot)
 
@@ -236,15 +236,15 @@ The boundary is `free == maint`, which is solvent (`AccountSolvent`). One µUSDC
 
 ### Force-exercise fee (`base = ⌈L / 10⌉` at the defaults)
 
-Demo range `[-40176, -38168)`: `hw = 1004`, `mid = -39172`, eligible when `tick ≥ -37868` or `tick < -40476`.
+Demo range `[-40176, -38168)`: `hw = 1004`, `mid = -39172`, eligible when `tick ≥ -37858` or `tick < -40486`.
 
 | Case | `L` | Tick | `n = max(1, \|tick − mid\| / hw)` | Fee (µUSDC) |
 |---|---|---|---|---|
-| `FX_IN_RANGE_REJECT` | any | `-38168` … `-37869` (inside band) | — | **`NotExercisable`** |
-| `FX_NEAR_RANGE_FEE` | `50_000_000` | `-37868` | `1` | `5_000_000` |
+| `FX_IN_RANGE_REJECT` | any | `-38168` … `-37859` (inside band) | — | **`NotExercisable`** |
+| `FX_NEAR_RANGE_FEE` | `50_000_000` | `-37858` | `1` | `5_000_000` |
 | `FX_FAR_RANGE_FEE` | `50_000_000` | `-34152` | `5` | `312_500` |
 | halving floor | `50_000_000` | `-20000` | `19` → capped at 10 halvings | `4_882` |
-| minimum fee | `1` | `-37868` | `1` | `1` (floor) |
+| minimum fee | `1` | `-37858` | `1` | `1` (floor) |
 
 Unit tests: `programs/perma/src/risk.rs` (`p4_…`). Integration: `tests/liquidation.ts`, `tests/force-exercise.ts`.
 
