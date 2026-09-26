@@ -17,6 +17,8 @@ const ALL_VARIANTS = [
   "InsolventMint", "MissingOpenLong", "TooManyOpenLongs", "InvalidRiskParams",
   // P3 (ADR-0004). The P1 admin-only errors are not user-facing, so not listed.
   "OracleUnavailable", "OracleStale", "OracleConfidenceTooWide", "OracleDeviationTooHigh",
+  // P4 (ADR-0005).
+  "AccountSolvent", "NotExercisable", "SelfTarget",
 ];
 
 describe("PERMA_ERROR_COPY", () => {
@@ -27,8 +29,8 @@ describe("PERMA_ERROR_COPY", () => {
     }
   });
 
-  it("has exactly 39 entries — no stray or duplicate keys", () => {
-    expect(Object.keys(PERMA_ERROR_COPY).length).toBe(39);
+  it("has exactly 42 entries — no stray or duplicate keys", () => {
+    expect(Object.keys(PERMA_ERROR_COPY).length).toBe(42);
     expect(Object.keys(PERMA_ERROR_COPY).sort()).toEqual([...ALL_VARIANTS].sort());
   });
 });

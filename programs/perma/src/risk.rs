@@ -172,7 +172,17 @@ fn requirement_parts(
 pub const MAINT_MARGIN_BPS: u128 = 7_500;
 pub const FX_FEE_BASE_SLOTS: u64 = 100;
 pub const FX_FEE_MAX_HALVINGS: i64 = 10;
+/// Smallest liquidation shortfall that pauses the market (1 USDC, the
+/// default margin buffer every long posts). Below it the unpaid premium is
+/// written off to the range's shorts as their existing `premium_receivable`
+/// carry, so a dust account cannot halt trading for everyone.
+pub const PAUSE_SHORTFALL_MIN_USDC: u64 = 1_000_000;
 const BPS: u128 = 10_000;
+
+/// PRD B30 with the ADR-0005 dust floor: halt only on a real shortfall.
+pub(crate) fn shortfall_pauses(shortfall: u64) -> bool {
+    shortfall >= PAUSE_SHORTFALL_MIN_USDC
+}
 
 /// `⌈x × MAINT_MARGIN_BPS / 10_000⌉` - maintenance share of a margin.
 fn maint_share(x: u128) -> Result<u128> {
@@ -638,6 +648,16 @@ mod tests {
         assert_eq!(liquidation_bonus(1_000_000, 37_250_000, margin).unwrap(), 500_000);
         // Capped by the released maintenance margin.
         assert_eq!(liquidation_bonus(u64::MAX, u64::MAX, margin).unwrap(), 38_250_000);
+    }
+
+    /// L5: a dust shortfall is written off; from 1 USDC it pauses.
+    #[test]
+    fn p4_dust_shortfall_does_not_pause() {
+        assert!(!shortfall_pauses(0));
+        assert!(!shortfall_pauses(1));
+        assert!(!shortfall_pauses(PAUSE_SHORTFALL_MIN_USDC - 1));
+        assert!(shortfall_pauses(PAUSE_SHORTFALL_MIN_USDC));
+        assert!(shortfall_pauses(4_000_000)); // L4
     }
 
     /// Splitting never beats one call: each bonus ≤ the maintenance it frees,

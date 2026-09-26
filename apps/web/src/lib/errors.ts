@@ -57,6 +57,10 @@ export const PERMA_ERROR_COPY: Record<string, string> = {
     "The reference price is too uncertain right now, so new positions can't open. Try again shortly.",
   OracleDeviationTooHigh:
     "The pool price is too far from the reference price, so new positions can't open. Try again shortly.",
+  // P4 (ADR-0005). Returned to whoever calls liquidate_long / force_exercise.
+  AccountSolvent: "This account covers its premium and margin, so it can't be liquidated.",
+  NotExercisable: "The price isn't far enough outside this long's range to force-exercise it.",
+  SelfTarget: "You can't liquidate or force-exercise your own position. Close it instead.",
 };
 
 export interface ParsedPermaError {

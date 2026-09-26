@@ -1062,9 +1062,12 @@ pub mod perma {
         let bonus = if shortfall == 0 {
             risk::liquidation_bonus(a.user_collateral.free(Side::B), deficit, target_margin)?
         } else {
-            // PRD B30: halt, never socialize. The range's shorts keep the
-            // unpaid part as their existing `premium_receivable` carry.
-            a.market.is_paused = true;
+            // PRD B30: never socialize. The range's shorts keep the unpaid
+            // part as their existing `premium_receivable` carry. Only a real
+            // shortfall halts the market; dust is written off (ADR-0005 §4).
+            if risk::shortfall_pauses(shortfall) {
+                a.market.is_paused = true;
+            }
             0
         };
         collateral::debit_usdc(&mut a.user_collateral, bonus)?;

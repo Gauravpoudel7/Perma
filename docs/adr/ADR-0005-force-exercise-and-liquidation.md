@@ -96,18 +96,21 @@ Sources are Panoptic's public docs and the Code4rena audit repos (2024-09 and 20
 | `FX_MAX_STALENESS_SECS` | 30 | `oracle.rs` |
 | `FX_FEE_BASE_SLOTS` | 100 | `risk.rs` |
 | `FX_FEE_MAX_HALVINGS` | 10 | `risk.rs` |
+| `PAUSE_SHORTFALL_MIN_USDC` | 1_000_000 (1 USDC) | `risk.rs` (amended 2026-09-26, §4) |
 
 These are demo values. Change them only by amending this ADR. They are constants rather than `Market` fields: YAGNI until a second market needs different ones.
 
 #### 4. Pause and bad debt
 
 - Both instructions reduce risk, so they are **allowed while paused**, as withdraw, settle and burn are today (Q6). A pause therefore cannot trap an insolvent account in accrual.
-- A **shortfall** liquidation:
-  - sets `market.is_paused = true` in the same instruction
+- Any **shortfall** liquidation (`paid < payable`):
+  - pays no bonus
   - emits `shortfall > 0`
   - leaves the range's shorts holding the unpaid part as `premium_receivable` carry
-
-  An admin then follows PRD B30 (pause → assess → public note → remediation) before `unpause_market`. There is no haircut and no socialization.
+- **Dust floor (amended 2026-09-26).** Only a shortfall of **`PAUSE_SHORTFALL_MIN_USDC` = 1 USDC or more** sets `market.is_paused = true` in the same instruction. A smaller shortfall is **written off**: the long closes, the shorts keep the unpaid dust as carry, and the market stays open.
+  - **Why:** without a floor, anyone could open a tiny long, let it run past its margin, and halt trading for everyone for a few µUSDC. 1 USDC is the default margin buffer every long posts.
+  - **Accepted cost:** an owner with 8 longs could write off just under 8 USDC in total. Each write-off is visible as `shortfall` (with `paused = false`) in `LongLiquidated`, so ops can alert on the sum.
+- **Who can unpause:** only the protocol admin, `GlobalConfig.admin`, through `unpause_market` (`factory::require_admin`, else `Unauthorized`). Today that is `7eDWS2L8mHFJtzDECyMBwNkYkhV1xvWewRKxPUg4ELnY`; it changes only through `transfer_admin`. Liquidators, owners and the market's shorts cannot unpause. After an auto-pause, the admin follows PRD B30 (pause → assess → public note → remediation) before `unpause_market`. There is no haircut and no socialization.
 
 #### 5. Ordering when both apply
 
@@ -143,7 +146,7 @@ These are demo values. Change them only by amending this ADR. They are constants
 | Q3 | Force fee | 100-slot premium base, halving per half-width from the range midpoint, at most 10 halvings. |
 | Q4 | P4 staleness | 30 s, force exercise only. |
 | Q5 | Who may call | Anyone with a PERMA account in the market; caller ≠ owner. |
-| Q6 | Pause | Both allowed while paused; a shortfall auto-pauses. |
+| Q6 | Pause | Both allowed while paused; a shortfall of 1 USDC or more auto-pauses, smaller ones are written off (amended 2026-09-26). Only `GlobalConfig.admin` unpauses. |
 
 ### Test vectors
 
@@ -153,7 +156,8 @@ These are demo values. Change them only by amending this ADR. They are constants
 | `LIQ_INSOLVENT_OK` | same | Below maintenance → closes; premium paid first; bonus = the three-way min |
 | `LIQ_SPOT_SPIKE_FAIL` | `tests/force-exercise.ts` | Spot OOR but reference in range (deviation) → refused. Liquidation has no price to spike. |
 | `LIQ_STALE_ORACLE_FAIL` | `tests/force-exercise.ts` | Update older than 30 s → `OracleStale` |
-| `LIQ_PAUSE_INTERACTION` | `tests/liquidation.ts` | Allowed while paused; a shortfall sets `is_paused` and emits `shortfall` |
+| `LIQ_PAUSE_INTERACTION` | `tests/liquidation.ts` | Allowed while paused; a shortfall ≥ 1 USDC sets `is_paused` and emits `shortfall` |
+| `LIQ_DUST_NO_PAUSE` | `risk.rs` unit + `tests/liquidation.ts` | A tiny insolvent account (shortfall > 0, < 1 USDC) is closed with no bonus, and the market stays unpaused |
 | `FX_IN_RANGE_REJECT` | `risk.rs` unit + `tests/force-exercise.ts` | Tick inside the range or within the 310-tick band → `NotExercisable` |
 | `FX_OOR_OK` | `tests/force-exercise.ts` | Eligible → closes; fee to the owner; `available_short_liquidity` restored; the short can burn |
 | `FX_NEAR_RANGE_FEE` / `FX_FAR_RANGE_FEE` | `risk.rs` unit, `FIXTURES-AND-VECTORS.md` §8 | Fee at the frozen points |

@@ -230,9 +230,12 @@ These use the §0 parameters and the demo risk defaults: `required_margin(L) = L
 | L1 `LIQ_SOLVENT_REJECT` | `40_000_000` | `0` | `38_250_000` | **`AccountSolvent`** | — | — | `40_000_000` | — |
 | L2 `LIQ_INSOLVENT_OK` | `40_000_000` | `5_000_000` (100 slots) | `43_250_000` | closed | `5_000_000` | `3_250_000` | `31_750_000` | `0` |
 | L3 bonus capped by R/2 | `6_000_000` | `5_000_000` | `43_250_000` | closed | `5_000_000` | `500_000` | `500_000` | `0` |
-| L4 `LIQ_PAUSE_INTERACTION` (shortfall) | `1_000_000` | `5_000_000` | `43_250_000` | closed, **market paused** | `1_000_000` | `0` | `0` | `4_000_000` |
+| L4 `LIQ_PAUSE_INTERACTION` (shortfall) | `1_000_000` | `5_000_000` | `43_250_000` | closed, **market paused** (4 USDC ≥ 1 USDC) | `1_000_000` | `0` | `0` | `4_000_000` |
+| L5 `LIQ_DUST_NO_PAUSE` (`L = 1_000_000`, horizon 20) | `25_000` | `60_000` (60 slots) | `75_001` | closed, **market stays open** | `25_000` | `0` | `0` | `35_000` (< 1 USDC, written off) |
 
 The boundary is `free == maint`, which is solvent (`AccountSolvent`). One µUSDC less is liquidatable.
+
+The pause floor is `PAUSE_SHORTFALL_MIN_USDC = 1_000_000`: a shortfall of `999_999` is written off, `1_000_000` pauses. Only `GlobalConfig.admin` can `unpause_market`.
 
 ### Force-exercise fee (`base = ⌈L / 10⌉` at the defaults)
 

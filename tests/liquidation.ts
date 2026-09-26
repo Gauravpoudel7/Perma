@@ -7,6 +7,7 @@
  *  - L1  a healthy account is refused (`AccountSolvent`) - liquidation reads no price
  *  - L2  below maintenance: premium paid in full, bonus = min(R/2, D, 0.75 × margin)
  *  - L4  shortfall: pay what is there, no bonus, market paused, never socialized
+ *  - L5  a dust shortfall (< 1 USDC) is written off: no bonus, NO pause
  *  - FX  only `FX_BAND_TICKS` past the range AND with a fresh (30 s) Pyth
  *        reference; the owner's premium is paid and the caller pays the fee
  *  - SPOOF the open-long list cannot be dropped or padded; nobody targets themselves
@@ -423,6 +424,35 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
       assert.isFalse(await isPaused());
     });
 
+    it("L5: a tiny insolvent account cannot pause the market (dust shortfall is written off)", async () => {
+      // L = 1e6 owes 1_000 µUSDC/slot; margin at 20 slots = 20_001. With
+      // 25_000 free it is liquidatable after ~10 slots and short after ~25.
+      const FREE = 25_000n;
+      const dusty = await newUser(FREE);
+      users.push(dusty);
+      const d = posSet(dusty.publicKey, DEMO);
+      await mintLong(d, 1_000_000n, [dusty]);
+      await waitSlots(60); // owes >= 60_000 > free, far below 1 USDC
+
+      const vault = rangeVaultPda(DEMO);
+      const v0 = await amt(vault), me0 = await freeB(me);
+      const sig = await liquidate(d);
+      await conn.confirmTransaction(sig, "confirmed");
+      const tx = await conn.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+      const ev = [...new anchor.EventParser(program.programId, program.coder).parseLogs(tx!.meta!.logMessages!)]
+        .find((e) => e.name === "longLiquidated")!.data as any;
+      const shortfall = BigInt(ev.shortfall.toString());
+
+      assert.isAbove(Number(shortfall), 0, "it really was insolvent");
+      assert.isBelow(Number(shortfall), 1_000_000, "dust: under PAUSE_SHORTFALL_MIN_USDC");
+      assert.equal((await amt(vault)) - v0, FREE, "everything free was paid");
+      assert.equal(BigInt(ev.premiumPaid.toString()), FREE);
+      assert.equal(await freeB(me), me0, "no bonus on a shortfall");
+      assert.isFalse(ev.paused);
+      assert.isFalse(await isPaused(), "a dust account cannot halt trading");
+      assert.equal((await uc(dusty.publicKey)).openLongs, 0);
+    });
+
     it("L4: shortfall pays what is there, no bonus, pauses; a paused market still liquidates", async () => {
       const free = 2n * LIQ_MARGIN + 500_000n; // two margins + 10 slots of the first long's accrual
       await topUpTo(alice, free);
@@ -430,7 +460,7 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
       const b2 = posSet(alice.publicKey, DEMO);
       await mintLong(b1, L50, [alice]);
       await mintLong(b2, L50, [alice]);
-      await waitSlots(70); // the first long alone now owes > 3.5e6 > free
+      await waitSlots(100); // the first long alone owes > 5e6: shortfall > 2.5 USDC, above the pause floor
 
       const vault = rangeVaultPda(DEMO);
       let v0 = await amt(vault), me0 = await freeB(me);
@@ -438,7 +468,7 @@ describe("liquidation + force exercise (P4, ADR-0005)", () => {
       assert.equal((await amt(vault)) - v0, free, "everything free was paid");
       assert.equal(await freeB(me), me0, "no bonus on a shortfall");
       assert.equal(await freeB(alice.publicKey), 0n);
-      assert.isTrue(await isPaused(), "PRD B30: halt, never socialize");
+      assert.isTrue(await isPaused(), "PRD B30: a shortfall of 1 USDC or more halts, never socializes");
 
       v0 = await amt(vault);
       await liquidate(b2); // Q6: allowed while paused
