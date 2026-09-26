@@ -1340,6 +1340,304 @@ export type Perma = {
       ]
     },
     {
+      "name": "forceExercise",
+      "docs": [
+        "**Force-exercise** a long whose range is far out of the money",
+        "(ADR-0005 §2), freeing the short liquidity it pins.",
+        "",
+        "The pool tick must be `oracle::FX_BAND_TICKS` beyond the range *and*",
+        "agree with a fresh Pyth reference, so spot alone never triggers it.",
+        "The owner's premium is paid in full (else this fails and liquidation",
+        "is the path), and the caller pays the owner a fee. Long P&L stays 0.",
+        "",
+        "remaining_accounts: the **caller's** full open-long list, for the fee."
+      ],
+      "discriminator": [
+        243,
+        68,
+        199,
+        59,
+        67,
+        124,
+        157,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "signer": true
+        },
+        {
+          "name": "callerCollateral",
+          "docs": [
+            "The bonus lands here, or the fee leaves from here."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  108,
+                  108,
+                  97,
+                  116,
+                  101,
+                  114,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "caller"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "from `caller`, or one `UserCollateral` would be written twice."
+          ],
+          "writable": true,
+          "relations": [
+            "userCollateral",
+            "permaPosition"
+          ]
+        },
+        {
+          "name": "market",
+          "docs": [
+            "`mut` only for the shortfall auto-pause."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.whirlpool",
+                "account": "market"
+              }
+            ]
+          },
+          "relations": [
+            "callerCollateral",
+            "userCollateral",
+            "permaPosition"
+          ]
+        },
+        {
+          "name": "marketAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "userCollateral",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  108,
+                  108,
+                  97,
+                  116,
+                  101,
+                  114,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permaPosition",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  101,
+                  114,
+                  109,
+                  97,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "permaPosition.nonce",
+                "account": "permaPosition"
+              }
+            ]
+          }
+        },
+        {
+          "name": "premiumIndex",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  101,
+                  109,
+                  105,
+                  117,
+                  109,
+                  95,
+                  105,
+                  110,
+                  100,
+                  101,
+                  120
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "rangeState",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "permaPosition.tickLower",
+                "account": "permaPosition"
+              },
+              {
+                "kind": "account",
+                "path": "permaPosition.tickUpper",
+                "account": "permaPosition"
+              }
+            ]
+          }
+        },
+        {
+          "name": "rangeVault",
+          "writable": true
+        },
+        {
+          "name": "vaultB",
+          "writable": true
+        },
+        {
+          "name": "tokenProgram"
+        },
+        {
+          "name": "whirlpool",
+          "docs": [
+            "`force_exercise` only; checked against `market.whirlpool`."
+          ],
+          "optional": true
+        },
+        {
+          "name": "priceUpdate",
+          "docs": [
+            "`force_exercise` only. CHECK: `oracle::load_price_update`."
+          ],
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initializeGlobalConfig",
       "docs": [
         "Set the protocol admin and the single-pool allowlist.",
@@ -1404,6 +1702,303 @@ export type Perma = {
           "type": "pubkey"
         }
       ]
+    },
+    {
+      "name": "liquidateLong",
+      "docs": [
+        "**Liquidate one long** of an account below maintenance (ADR-0005 §1).",
+        "",
+        "Permissionless and price-free: eligibility is premium over time, as in",
+        "ADR-0003, so no spot or oracle move can make an account liquidatable.",
+        "One long per call; each call re-checks the whole account, so a split",
+        "liquidation stops as soon as the account is healthy again.",
+        "",
+        "remaining_accounts: the **owner's** full open-long list."
+      ],
+      "discriminator": [
+        132,
+        118,
+        230,
+        137,
+        241,
+        193,
+        136,
+        93
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "signer": true
+        },
+        {
+          "name": "callerCollateral",
+          "docs": [
+            "The bonus lands here, or the fee leaves from here."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  108,
+                  108,
+                  97,
+                  116,
+                  101,
+                  114,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "caller"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "from `caller`, or one `UserCollateral` would be written twice."
+          ],
+          "writable": true,
+          "relations": [
+            "userCollateral",
+            "permaPosition"
+          ]
+        },
+        {
+          "name": "market",
+          "docs": [
+            "`mut` only for the shortfall auto-pause."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.whirlpool",
+                "account": "market"
+              }
+            ]
+          },
+          "relations": [
+            "callerCollateral",
+            "userCollateral",
+            "permaPosition"
+          ]
+        },
+        {
+          "name": "marketAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "userCollateral",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  108,
+                  108,
+                  97,
+                  116,
+                  101,
+                  114,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permaPosition",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  101,
+                  114,
+                  109,
+                  97,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "permaPosition.nonce",
+                "account": "permaPosition"
+              }
+            ]
+          }
+        },
+        {
+          "name": "premiumIndex",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  101,
+                  109,
+                  105,
+                  117,
+                  109,
+                  95,
+                  105,
+                  110,
+                  100,
+                  101,
+                  120
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "rangeState",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  103,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "permaPosition.tickLower",
+                "account": "permaPosition"
+              },
+              {
+                "kind": "account",
+                "path": "permaPosition.tickUpper",
+                "account": "permaPosition"
+              }
+            ]
+          }
+        },
+        {
+          "name": "rangeVault",
+          "writable": true
+        },
+        {
+          "name": "vaultB",
+          "writable": true
+        },
+        {
+          "name": "tokenProgram"
+        },
+        {
+          "name": "whirlpool",
+          "docs": [
+            "`force_exercise` only; checked against `market.whirlpool`."
+          ],
+          "optional": true
+        },
+        {
+          "name": "priceUpdate",
+          "docs": [
+            "`force_exercise` only. CHECK: `oracle::load_price_update`."
+          ],
+          "optional": true
+        }
+      ],
+      "args": []
     },
     {
       "name": "lockCollateral",
@@ -3204,6 +3799,32 @@ export type Perma = {
       ]
     },
     {
+      "name": "longForceExercised",
+      "discriminator": [
+        63,
+        141,
+        165,
+        166,
+        171,
+        113,
+        58,
+        216
+      ]
+    },
+    {
+      "name": "longLiquidated",
+      "discriminator": [
+        118,
+        100,
+        250,
+        117,
+        155,
+        0,
+        21,
+        241
+      ]
+    },
+    {
       "name": "longMinted",
       "discriminator": [
         245,
@@ -3565,6 +4186,21 @@ export type Perma = {
       "code": 6040,
       "name": "oracleDeviationTooHigh",
       "msg": "Pool spot deviates too far from the reference price"
+    },
+    {
+      "code": 6041,
+      "name": "accountSolvent",
+      "msg": "Account is above maintenance; nothing to liquidate"
+    },
+    {
+      "code": 6042,
+      "name": "notExercisable",
+      "msg": "Long is not far enough out of range to force-exercise"
+    },
+    {
+      "code": 6043,
+      "name": "selfTarget",
+      "msg": "Cannot liquidate or force-exercise your own position"
     }
   ],
   "types": [
@@ -3914,6 +4550,105 @@ export type Perma = {
           {
             "name": "availableAfter",
             "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "longForceExercised",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "exercisor",
+            "type": "pubkey"
+          },
+          {
+            "name": "permaPosition",
+            "type": "pubkey"
+          },
+          {
+            "name": "size",
+            "type": "u128"
+          },
+          {
+            "name": "premiumPaid",
+            "type": "u64"
+          },
+          {
+            "name": "fee",
+            "type": "u64"
+          },
+          {
+            "name": "tick",
+            "type": "i32"
+          },
+          {
+            "name": "referencePrice",
+            "type": "i64"
+          },
+          {
+            "name": "conf",
+            "type": "u64"
+          },
+          {
+            "name": "publishTime",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "longLiquidated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquidator",
+            "type": "pubkey"
+          },
+          {
+            "name": "permaPosition",
+            "type": "pubkey"
+          },
+          {
+            "name": "size",
+            "type": "u128"
+          },
+          {
+            "name": "premiumPaid",
+            "type": "u64"
+          },
+          {
+            "name": "bonus",
+            "type": "u64"
+          },
+          {
+            "name": "shortfall",
+            "docs": [
+              "Premium the owner could not pay. Non-zero pauses the market."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
           }
         ]
       }

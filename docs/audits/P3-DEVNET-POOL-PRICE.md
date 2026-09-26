@@ -12,7 +12,7 @@
 | Tooling | `scripts/rebalance-devnet-pool.mjs` (`--measure` / `--plan` / `--step` / `--until-within-bps`), `scripts/fund-devusdc-faucet.mjs` (`--once` / `--until`), [RUNBOOK-DEVNET.md](../07-ops-presentation/RUNBOOK-DEVNET.md) §4 |
 | Phase A report | [IMPL-P3-DEVNET-POOL-PRICE-REPORT.md](IMPL-P3-DEVNET-POOL-PRICE-REPORT.md) |
 | Upgrade follow-on | [IMPL-P3-DEVNET-UPGRADE.md](IMPL-P3-DEVNET-UPGRADE.md). The upgrade was run from the operator Mac. The live ELF is 604,992 B at slot 502908043. |
-| Side effect (open) | A **fresh** localnet ledger clones the pool at ~$117, so the 18–22 fixture range is below spot. The result is 117 passing / 5 failing (WSOL assertions). See [`RELEASE-GATE.md`](../06-testing/RELEASE-GATE.md) §3 "Known regression". |
+| Side effect (fixed) | A fresh localnet ledger cloned the pool at ~$117 and failed 5 WSOL assertions. Fixed by freezing the pool, vaults and TickArrays as ~$20 snapshots: 122 / 0 on a fresh ledger. See [`RELEASE-GATE.md`](../06-testing/RELEASE-GATE.md) §3. |
 
 ## Problem
 

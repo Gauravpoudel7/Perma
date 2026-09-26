@@ -22,6 +22,12 @@
 
 The devnet program runs P3 (ELF **604,992 B**, slot **502908043**). The allowlisted pool `2WUg…` was swapped back to Pyth SOL/USD (~$117) and is within the 200 bps band. `yarn smoke-devnet-p3 --smoke` is green: Hermes post, deposit, mint short, mint long, close the Pyth accounts, then settle, close long, close short. The web client asks for **one** wallet approval for the three Pyth transactions and refuses a Hermes update older than 30 s before it sends anything. Web `yarn test` **113**. Ticket: [`P3-DEVNET-POOL-PRICE.md`](../audits/P3-DEVNET-POOL-PRICE.md).
 
+## Protocol V1 P4 (liquidation + force exercise) — **PASSED on localnet and Solana-devnet** (2026-09-26)
+
+**133 passing / 0 failing** on a fresh ledger (122 + 1 SPL Token id guard in `tests/collateral.ts` + 10 in `tests/liquidation.ts`, including L5, the dust shortfall that must not pause); unit **82**. [ADR-0005](../adr/ADR-0005-force-exercise-and-liquidation.md) is Accepted and amended with the 1 USDC pause floor; the vectors are in [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) §8.
+
+**Solana-devnet runs P4** (ELF **646,736 B**, sha256 `7be19b0e1970cd6b…`, slot **504445005**, upgrade `3Sbt5ovRrZ1AoEdhD2rxv9gcNSugU2ghsjNuUQdoFfCFNBbFdqi3Ud9SwyhwtpCxcenG6rvFxBGSt8kmQrjWfK8p`). Every live account decoded under the new IDL at its old size before the upgrade, so no migration was needed. The first deploy attempt failed partway; it was resumed from its buffer with `--use-rpc`, and the live dump is byte-identical to the build. `yarn smoke-devnet-p3 --smoke` is green on it: deposit, mint short, mint long, settle, close long, close short.
+
 **Checklist notes (Fair honesty):** S1–S5, A1–A3, Q1, Q3 met by the green suites above. Q2 anti-slop remains an ongoing UI bar. E1/E2: localnet product loop (deposit → short → long → portfolio) verified by hand; Fair has **no mark P&L** ([ADR-0003](../adr/ADR-0003-fair-mvp-risk-model.md)) — UI shows positions, collateral, and premium, not CEX-style P&L%. Devnet full `E2E-DEMO-SCRIPT` remains optional ops polish, not a Fair reopen.
 
 ---
@@ -120,15 +126,15 @@ suite fails fast in its `before` hook.
 |---|---|
 | `whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc` | Whirlpool program (same ID on devnet and mainnet) |
 | `FcrweFY1G9HJAHG5inkGB6pKg1HZ6x9UC2WioAfWrGkR` | `WhirlpoolsConfig`, devnet |
-| `2WUgXb…ym9G` | **The allowlisted SOL/devUSDC Whirlpool** (`tick_spacing = 8`) |
-| `3uyTv2…DGh4` / `63GvSv…DT5C` | its `token_vault_a` / `token_vault_b` |
+| `2WUgXb…ym9G` | **The allowlisted SOL/devUSDC Whirlpool** (`tick_spacing = 8`), snapshot `tests/fixtures/pool.json` |
+| `3uyTv2…DGh4` / `63GvSv…DT5C` | its `token_vault_a` / `token_vault_b`, snapshots `pool-vault-a/b.json` |
 | `So1111…1112` / `BRjpCH…ok1k` | WSOL and devUSDC mints |
-| `86pYzh…H571` / `49ixSQ…cFPv` | TickArrays for the demo range (starts `-40832`, `-38720`) |
-| `ACkArM…KZGy` | TickArray `-39424`, the narrow same-array case |
+| `86pYzh…H571` / `49ixSQ…cFPv` | TickArrays for the demo range (starts `-40832`, `-38720`), snapshots |
+| `ACkArM…KZGy` | TickArray `-39424`, the narrow same-array case, snapshot |
 | `EgxU92…EiZ4` | a devnet pool with **active reward emissions** — proves the factory's allowlist check fires before its rewards check (`tests/factory*.ts`) |
 | `3KBZiL…HvPt` | a real devnet pool that is **not** allowlisted (`tests/adapter.ts`) |
 
-> **Known regression since 2026-09-25 (open, needs a decision).** `--clone 2WUg…` copies the pool's *live* devnet state. The pool was moved to Pyth (~$117, tick ~−21449) by P3-DEVNET-POOL-PRICE, so on a **fresh** ledger the 18–22 demo range sits below spot and a short there takes devUSDC only. Measured on a fresh clone (2026-09-25): **117 passing / 5 failing**. The failures are the WSOL assertions in `tests/adapter-liquidity.ts` (add, partial remove, slippage cap) and `tests/position-short.ts` (mint locks WSOL, two concurrent shorts). The program is not at fault. A ledger cloned before 2026-09-25 still gives 122/0. Fix options: pin the pool and its two vaults as `--account` JSON snapshots at ~$20 (recommended: tests stop depending on devnet drift), or retarget the fixture range around the live spot and clone the matching TickArrays.
+> **Pool frozen as a snapshot (2026-09-25).** `--clone 2WUg…` used to copy the pool's *live* devnet state. P3-DEVNET-POOL-PRICE moved that pool to Pyth (~$117), which left the 18–22 demo range below spot; a fresh ledger then gave 117 passing / 5 failing on WSOL assertions. The pool, its two vaults and the three TickArrays are now `--account` snapshots (`tests/fixtures/pool.json`, `pool-vault-a/b.json`, `tick-array-m40832/m38720/m39424.json`), dumped from a ledger at **$19.97** (tick −39140). Measured on a fresh ledger: **122 / 0** forward and reversed. Re-dump only from a ~$20 ledger, never from live devnet.
 
 TickArrays must be cloned too, or every liquidity call fails with `TickArrayNotInitialized`. The three above cover the demo range on the allowlisted pool — see [`01-clmm-adapter-orca.md`](../02-mvp-components/01-clmm-adapter-orca.md) §C.3a for the derivation.
 
@@ -188,10 +194,10 @@ npx ts-mocha -p ./tsconfig.json -t 1000000 \
   tests/factory.ts tests/position-short.ts tests/position-long.ts \
   tests/settle-premium.ts tests/risk-solvency.ts \
   tests/admin-transfer.ts tests/range-unwind.ts tests/oracle-risk.ts \
-  tests/pause-admin.ts tests/events.ts
+  tests/pause-admin.ts tests/events.ts tests/liquidation.ts
 ```
 
-Expected: **122 passing, 0 failing** (76 through component 09 + 7 in `tests/admin-transfer.ts` + 5 in `tests/range-unwind.ts` + 8 in `tests/oracle-risk.ts` + 17 in `tests/pause-admin.ts` + 9 in `tests/events.ts`). Every minting suite refreshes the tag-0 mock price itself (`tests/oracle-mock.ts`); `oracle-risk.ts` pauses/unpauses and restores that price in a `finally`, so it self-heals like the P1 suites. The two P1 suites (Protocol V1 — `transfer_admin`, `unwind_empty_range`) go before `pause-admin.ts`; they self-heal the same way, and `admin-transfer.ts` hands `GlobalConfig.admin` back to the provider wallet in an unconditional `after()`. This covers gates **S1–S5** below. `pause-admin.ts` and `events.ts` go **last** in the forward list: both self-heal (unpause + restore risk defaults + burn what they opened) in their own `before()`/`after()`, so the reversed pass — where they run first — also stays clean.
+Expected: **133 passing, 0 failing** (77 through component 09 + 7 in `tests/admin-transfer.ts` + 5 in `tests/range-unwind.ts` + 8 in `tests/oracle-risk.ts` + 17 in `tests/pause-admin.ts` + 9 in `tests/events.ts` + 10 in `tests/liquidation.ts`). Every minting suite refreshes the tag-0 mock price itself (`tests/oracle-mock.ts`); `oracle-risk.ts` pauses/unpauses and restores that price in a `finally`, so it self-heals like the P1 suites. The two P1 suites (Protocol V1 — `transfer_admin`, `unwind_empty_range`) go before `pause-admin.ts`; they self-heal the same way, and `admin-transfer.ts` hands `GlobalConfig.admin` back to the provider wallet in an unconditional `after()`. This covers gates **S1–S5** below. `pause-admin.ts` and `events.ts` go **last** in the forward list, followed only by the P4 `liquidation.ts`. All three self-heal (unpause + restore risk defaults + burn what they opened) in their own `before()`/`after()`, so the reversed pass — where they run first — also stays clean.
 
 > `tests/factory-rewards.ts` is **excluded on purpose** and needs its own `--reset`
 > ledger: it allowlists a different pool, so running it alongside makes every other
@@ -370,7 +376,7 @@ Sign off only with a real artifact per row — a transaction signature, or the t
 | E2 | UI shows live P&L and accrued premium matching on-chain state | §6 |
 | Q1 | The banner `Prototype. Not audited. Single pool. Not production mainnet risk capital.` is visible on **every** page, verbatim and non-dismissible | [`COPY-DECK.md`](../04-ui-ux/COPY-DECK.md) §1 |
 | Q2 | All screens pass the anti-slop review, including the banned-phrase list | [`UI-QA-CHECKLIST.md`](../04-ui-ux/UI-QA-CHECKLIST.md), `COPY-DECK.md` §5 |
-| Q3 | `yarn test:unit` green (75), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
+| Q3 | `yarn test:unit` green (82), incl. the V6 anti-grief and V4 ordering guards; `node scripts/reconcile.mjs` reports both identities and every `open_longs` counter holding | §4.4 · [`FIXTURES-AND-VECTORS.md`](FIXTURES-AND-VECTORS.md) |
 
 **The gate passes only when every row above passes.** A partial pass is a FAIL.
 

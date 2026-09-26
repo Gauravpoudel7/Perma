@@ -335,6 +335,24 @@ describe("collateral: deposit, withdraw, lock, conservation", () => {
     }
   });
 
+  // SPL Memo v1 accepts this instruction data and moves nothing, so without
+  // the program-id check the ledger would be credited for free.
+  it("rejects a deposit through a program that is not SPL Token", async () => {
+    const MEMO_V1 = new PublicKey("Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo");
+    const before = (await program.account.userCollateral.fetch(mine)).balanceB.toString();
+    try {
+      await program.methods
+        .depositCollateral(new BN(0), new BN(1_000_000))
+        .accounts(depositAccounts(me, { tokenProgram: MEMO_V1 }))
+        .rpc();
+      assert.fail("expected InvalidAsset");
+    } catch (e: any) {
+      assert.include(e.toString(), "InvalidAsset");
+    }
+    const after = (await program.account.userCollateral.fetch(mine)).balanceB.toString();
+    assert.equal(after, before, "ledger not credited");
+  });
+
   it("rejects a zero-amount deposit", async () => {
     try {
       await deposit(0, 0);

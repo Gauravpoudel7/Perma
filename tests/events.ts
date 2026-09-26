@@ -390,13 +390,15 @@ describe("events: decodable on-chain events (component 11)", () => {
     await ensureFreeB(USDC(250));
   });
 
-  it("every one of the 21 catalogued events is in the IDL with a discriminator", () => {
+  it("every one of the 23 catalogued events is in the IDL with a discriminator", () => {
     const names = (program.idl as any).events.map((e: any) => e.name).sort();
     // 19 Fair events + the two P1 admin events (`AdminTransferred`,
-    // `RangeUnwound`). Additive only: nothing above was renamed or reordered.
-    assert.equal(names.length, 21);
+    // `RangeUnwound`) + the two P4 events (`LongLiquidated`,
+    // `LongForceExercised`). Additive only: nothing above was renamed or reordered.
+    assert.equal(names.length, 23);
     for (const n of ["shortMinted", "longMinted", "shortBurned", "longBurned", "premiumSettled",
-      "marketPauseSet", "marketPauseCleared", "marketRiskParamsSet"]) {
+      "marketPauseSet", "marketPauseCleared", "marketRiskParamsSet",
+      "longLiquidated", "longForceExercised"]) {
       assert.include(names, n);
     }
   });
