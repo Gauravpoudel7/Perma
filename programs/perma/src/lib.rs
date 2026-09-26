@@ -1364,6 +1364,11 @@ fn check_user_ata(info: &AccountInfo, mint: &Pubkey, owner: &Pubkey) -> Result<(
     Ok(())
 }
 
+/// Classic SPL Token, checked by every hand-built token CPI below. Unchecked,
+/// a caller's own no-op program would let `deposit_collateral` credit the
+/// ledger with no tokens moved, and a later real withdraw would drain the vault.
+const SPL_TOKEN_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
 /// Hand-built SPL `Transfer` (instruction tag `3`, then the `u64` amount).
 ///
 /// Built by hand rather than via `anchor-spl` to keep the dependency graph as
@@ -1380,6 +1385,7 @@ fn spl_transfer<'info>(
     amount: u64,
     signer_seeds: Option<&[&[&[u8]]]>,
 ) -> Result<()> {
+    require_keys_eq!(token_program.key(), SPL_TOKEN_ID, PermaError::InvalidAsset);
     let mut data = Vec::with_capacity(9);
     data.push(3u8); // SPL Token instruction: Transfer
     data.extend_from_slice(&amount.to_le_bytes());
@@ -1419,6 +1425,7 @@ fn close_token_account<'info>(
     authority: &AccountInfo<'info>,
     signer_seeds: &[&[&[u8]]],
 ) -> Result<()> {
+    require_keys_eq!(token_program.key(), SPL_TOKEN_ID, PermaError::InvalidAsset);
     let ix = anchor_lang::solana_program::instruction::Instruction {
         program_id: token_program.key(),
         accounts: vec![
@@ -1619,6 +1626,7 @@ fn ensure_range_vault<'info>(
     let seeds: [&[u8]; 4] = [seeds::RANGE_VAULT, market.as_ref(), &lower, &upper];
     let (expected, bump) = Pubkey::find_program_address(&seeds, program_id);
     require_keys_eq!(range_vault.key(), expected, PermaError::RangeStateMismatch);
+    require_keys_eq!(token_program.key(), SPL_TOKEN_ID, PermaError::InvalidAsset);
 
     if range_vault.data_len() == 0 {
         const TOKEN_ACCOUNT_LEN: u64 = 165;
